@@ -81,3 +81,17 @@ export function base64ToBody(bodyBase64: string) {
 
     return Buffer.from(bodyBase64, "base64");
 }
+
+export function websocketUrlToHttpUrl(serverUrl: string) {
+    const url = new URL(serverUrl);
+
+    if (url.protocol === "ws:") {
+        url.protocol = "http:";
+    }
+
+    if (url.protocol === "wss:") {
+        url.protocol = "https:";
+    }
+
+    return url;
+}

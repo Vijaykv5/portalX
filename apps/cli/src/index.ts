@@ -7,6 +7,7 @@ import {
     filterForwardHeaders,
     isValidPort,
     responseBodyToBase64,
+    websocketUrlToHttpUrl,
     type ServerMessage,
     type TunnelRequestMessage,
     type TunnelResponseMessage,
@@ -132,6 +133,16 @@ function buildTunnelServerUrl() {
     return url.toString();
 }
 
+function buildConnectCheckUrl() {
+    const url = websocketUrlToHttpUrl(tunnelServerBaseUrl);
+
+    url.pathname = "/_connect-check";
+    url.search = "";
+    url.searchParams.set("token", authToken);
+
+    return url.toString();
+}
+
 function parseServerMessage(data: unknown) {
     try {
         return JSON.parse(String(data)) as ServerMessage;
@@ -197,7 +208,29 @@ async function forwardToLocalApp(message: TunnelRequestMessage): Promise<TunnelR
     }
 }
 
-function connect() {
+async function runConnectCheck() {
+    try {
+        const response = await fetch(buildConnectCheckUrl());
+
+        if (response.ok) {
+            return true;
+        }
+
+        console.error(await response.text());
+        return false;
+    } catch {
+        console.error(`Could not reach Portlex server at ${tunnelServerBaseUrl}`);
+        return false;
+    }
+}
+
+async function connect() {
+    const canConnect = await runConnectCheck();
+
+    if (!canConnect) {
+        process.exit(1);
+    }
+
     const tunnelServerUrl = buildTunnelServerUrl();
     const socket = new WebSocket(tunnelServerUrl);
     activeSocket = socket;

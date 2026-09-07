@@ -132,6 +132,16 @@ Example response:
 }
 ```
 
+## Connect Check
+
+The CLI checks whether it can connect before opening the WebSocket:
+
+```txt
+http://localhost:8081/_connect-check?token=dev-token
+```
+
+This returns `200` when the server can accept a tunnel, `401` for a bad token, and `409` when another CLI is already connected.
+
 ## Test
 
 Run the end-to-end smoke test:
@@ -140,7 +150,7 @@ Run the end-to-end smoke test:
 bun run test:smoke
 ```
 
-The test starts a temporary tunnel server, a temporary local app, and a CLI process. It verifies path forwarding, query forwarding, POST body forwarding, single-connection protection, status reporting, and oversized request rejection.
+The test starts a temporary tunnel server, a temporary local app, and a CLI process. It verifies connection preflight, path forwarding, query forwarding, POST body forwarding, single-connection protection, status reporting, and oversized request rejection.
 
 ## What Works
 

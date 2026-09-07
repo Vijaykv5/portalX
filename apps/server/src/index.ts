@@ -86,6 +86,24 @@ function getStatus() {
     };
 }
 
+function checkTunnelConnection(token: string | null) {
+    if (token !== authToken) {
+        return new Response("Invalid tunnel auth token", {
+            status: 401,
+        });
+    }
+
+    if (activeTunnel) {
+        return new Response("A tunnel client is already connected", {
+            status: 409,
+        });
+    }
+
+    return Response.json({
+        ok: true,
+    });
+}
+
 function shutdown() {
     if (isShuttingDown) {
         return;
@@ -113,19 +131,16 @@ const server = Bun.serve({
             return Response.json(getStatus());
         }
 
+        if (url.pathname === "/_connect-check") {
+            return checkTunnelConnection(url.searchParams.get("token"));
+        }
+
         if (url.pathname === "/tunnel") {
             const token = url.searchParams.get("token");
+            const checkResponse = checkTunnelConnection(token);
 
-            if (token !== authToken) {
-                return new Response("Invalid tunnel auth token", {
-                    status: 401,
-                });
-            }
-
-            if (activeTunnel) {
-                return new Response("A tunnel client is already connected", {
-                    status: 409,
-                });
+            if (!checkResponse.ok) {
+                return checkResponse;
             }
 
             const upgraded = server.upgrade(req);

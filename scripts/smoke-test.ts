@@ -87,6 +87,12 @@ try {
     assert(emptyStatus.status === "ok", "Status endpoint should report ok");
     assert(emptyStatus.activeConnection === null, "Status endpoint should start with no active connection");
 
+    const invalidTokenCheckResponse = await fetch(`${tunnelServerUrl}/_connect-check?token=wrong`);
+    assert(invalidTokenCheckResponse.status === 401, "Connect check should reject invalid tokens");
+
+    const availableConnectionCheckResponse = await fetch(`${tunnelServerUrl}/_connect-check?token=dev-token`);
+    assert(availableConnectionCheckResponse.status === 200, "Connect check should allow an open slot");
+
     spawnProcess(["bun", "run", "cli", "--", "http", String(localAppPort)], {
         PORTLEX_SERVER_URL: tunnelServerWsUrl,
     });
@@ -98,6 +104,9 @@ try {
     assert(activeStatusResponse.status === 200, "Status endpoint should return 200 with an active tunnel");
     assert(activeStatus.activeConnection !== null, "Status endpoint should report one active connection");
     assert(activeStatus.activeConnection.requestCount === 1, "Status endpoint should include the health request");
+
+    const occupiedConnectionCheckResponse = await fetch(`${tunnelServerUrl}/_connect-check?token=dev-token`);
+    assert(occupiedConnectionCheckResponse.status === 409, "Connect check should reject a second connection");
 
     const duplicateConnectionResponse = await fetch(`${tunnelServerUrl}/tunnel?token=dev-token`);
     assert(duplicateConnectionResponse.status === 409, "Second tunnel connection should be rejected");
