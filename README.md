@@ -1,8 +1,8 @@
-# Tunnel
+# Portlex
 
 A lightweight ngrok-style HTTP tunneling prototype built with Bun.
 
-The server accepts public HTTP traffic and forwards it over a WebSocket to a CLI process running on your machine. The CLI calls your local app, captures the response, and sends it back through the tunnel.
+The server accepts public HTTP traffic and forwards it over a WebSocket to one CLI process running on your machine. The CLI calls your local app, captures the response, and sends it back through the tunnel.
 
 ```txt
 Browser -> tunnel server -> WebSocket -> CLI -> localhost app
@@ -32,19 +32,19 @@ bun --eval 'Bun.serve({ port: 3000, fetch: req => new Response("Hello from local
 Start the tunnel CLI:
 
 ```bash
-TUNNEL_SERVER_URL=ws://localhost:8081 bun run cli -- 3000 demo
+PORTLEX_SERVER_URL=ws://localhost:8081 bun run portlex -- http 3000
 ```
 
-You can also use the more CLI-like form:
+When installed as a package binary, the command shape becomes:
 
 ```bash
-TUNNEL_SERVER_URL=ws://localhost:8081 bun run tunnel -- --port 3000 --name demo
+portlex http 3000
 ```
 
 Open:
 
 ```txt
-http://localhost:8081/t/demo
+http://localhost:8081
 ```
 
 That request is forwarded to:
@@ -56,7 +56,7 @@ http://localhost:3000/
 Try another path:
 
 ```txt
-http://localhost:8081/t/demo/api/users
+http://localhost:8081/api/users
 ```
 
 That is forwarded to:
@@ -70,56 +70,89 @@ http://localhost:3000/api/users
 Server:
 
 ```bash
-PORT=8081 TUNNEL_AUTH_TOKEN=secret123 bun run server
+PORT=8081 PORTLEX_AUTH_TOKEN=secret123 bun run server
 ```
 
 CLI:
 
 ```bash
-TUNNEL_SERVER_URL=ws://localhost:8081 TUNNEL_AUTH_TOKEN=secret123 bun run cli -- 3000 demo
+PORTLEX_SERVER_URL=ws://localhost:8081 PORTLEX_AUTH_TOKEN=secret123 bun run portlex -- http 3000
 ```
 
 Arguments:
 
 ```txt
-bun run cli -- <local-port> <tunnel-id>
+bun run portlex -- http <local-port>
 ```
 
 CLI options:
 
 ```bash
-bun run tunnel -- --help
-bun run tunnel -- 3000 demo
-bun run tunnel -- --port 5173 --name vite --server ws://localhost:8081
+bun run portlex -- --help
+bun run portlex -- http 3000
+bun run portlex -- http --port 5173 --server ws://localhost:8081
 ```
 
 When installed as a package binary, the command shape becomes:
 
 ```bash
-tunnel 3000 demo
-tunnel --port 5173 --name vite --server ws://localhost:8081
+portlex http 3000
+portlex http --port 5173 --server ws://localhost:8081
 ```
 
 Examples:
 
 ```bash
-bun run cli -- 3000 demo
-bun run cli -- 5173 vite
-bun run cli -- 8000 api
+bun run portlex -- http 3000
+bun run portlex -- http 5173
+bun run portlex -- http 8000
 ```
 
-Tunnel IDs must be 3-40 characters and can only use letters, numbers, dashes, and underscores.
+Only one CLI connection can be active at a time. If another terminal tries to run `portlex http 3001` while `portlex http 3000` is already connected, the server rejects the second connection.
+
+## Status
+
+Check active tunnels:
+
+```txt
+http://localhost:8081/_status
+```
+
+Example response:
+
+```json
+{
+  "status": "ok",
+  "activeConnection": {
+    "connectedAt": "2026-09-07T13:57:29.000Z",
+    "requestCount": 3,
+    "lastRequestAt": "2026-09-07T13:58:10.000Z"
+  },
+  "pendingRequests": 0,
+}
+```
+
+## Test
+
+Run the end-to-end smoke test:
+
+```bash
+bun run test:smoke
+```
+
+The test starts a temporary tunnel server, a temporary local app, and a CLI process. It verifies path forwarding, query forwarding, POST body forwarding, single-connection protection, status reporting, and oversized request rejection.
 
 ## What Works
 
-- Multiple tunnel IDs with `/t/:tunnelId/...` routing
+- One active tunnel connection
 - Shared auth token for CLI connections
 - Configurable server port
 - Configurable local target port
 - Request IDs for concurrent request matching
 - Request timeout handling
-- Duplicate tunnel ID protection
+- Second connection protection
 - CLI reconnects after disconnect
+- Clean CLI and server shutdown on `Ctrl+C`
 - Safer forwarded headers
 - 1MB request body limit
 - Base64 transport for request and response bodies
@@ -129,7 +162,7 @@ Tunnel IDs must be 3-40 characters and can only use letters, numbers, dashes, an
 - HTTP only
 - No public deployment setup yet
 - No TLS/domain/subdomain support yet
-- No user accounts or per-user tunnel ownership yet
+- No user accounts or plan tiers yet
 - No streaming request or response bodies yet
 - WebSocket traffic through the tunnel is not supported yet
 
@@ -148,9 +181,9 @@ packages/protocol/src/index.ts
 
 ## Roadmap
 
-1. Add real subdomain routing.
+1. Add public deployment with a real hosted URL.
 2. Add TLS and deploy the server to a public VPS.
 3. Add streaming body support for large uploads/downloads.
-4. Add reserved tunnel names and stronger auth.
+4. Add accounts, plan limits, and stronger auth.
 5. Add request metrics and prettier CLI output.
-6. Package the CLI as an installable command.
+6. Package and publish the CLI.

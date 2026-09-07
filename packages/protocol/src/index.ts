@@ -37,14 +37,11 @@ export type TunnelResponseMessage = {
 export type ConnectedMessage = {
     type: "connected";
     message: string;
+    publicUrl: string;
 };
 
 export type ServerMessage = TunnelRequestMessage | ConnectedMessage;
 export type ClientMessage = TunnelResponseMessage;
-
-export function isValidTunnelId(tunnelId: string) {
-    return /^[a-zA-Z0-9_-]{3,40}$/.test(tunnelId);
-}
 
 export function isValidPort(port: number) {
     return Number.isInteger(port) && port > 0 && port < 65_536;

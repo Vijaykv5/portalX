@@ -6,7 +6,6 @@ import {
     base64ToBody,
     filterForwardHeaders,
     isValidPort,
-    isValidTunnelId,
     responseBodyToBase64,
     type ServerMessage,
     type TunnelRequestMessage,
@@ -14,33 +13,33 @@ import {
 } from "../../../packages/protocol/src/index";
 
 type CliConfig = {
+    command: "http";
     localPort: number;
-    tunnelId: string;
     tunnelServerBaseUrl: string;
     authToken: string;
 };
 
 function printHelp() {
-    console.log(`Tunnel
+    console.log(`Portlex
 
 Usage:
-  tunnel <port> [tunnel-id]
-  tunnel --port <port> --name <tunnel-id>
+  portlex http <port>
+  portlex http --port <port>
 
 Options:
   -p, --port <port>      Local port to forward to
-  -n, --name <id>        Tunnel ID used in /t/:id
-  -s, --server <url>     Tunnel server URL
-      --token <token>    Auth token for the tunnel server
+  -s, --server <url>     Portlex server URL
+      --token <token>    Auth token for the Portlex server
   -h, --help             Show help
 
 Environment:
-  TUNNEL_SERVER_URL      Defaults to ws://localhost:8080
-  TUNNEL_AUTH_TOKEN      Defaults to dev-token
+  PORTLEX_SERVER_URL     Defaults to ws://localhost:8080
+  PORTLEX_AUTH_TOKEN     Defaults to dev-token
+  PORTLEX_LOCAL_PORT     Defaults to 3000
 
 Examples:
-  tunnel 3000 demo
-  tunnel --port 5173 --name vite --server ws://localhost:8081
+  portlex http 3000
+  portlex http --port 5173 --server ws://localhost:8081
 `);
 }
 
@@ -57,12 +56,23 @@ function readOptionValue(args: string[], index: number, optionName: string) {
 
 function parseCliArgs(args: string[]): CliConfig {
     const positionalArgs: string[] = [];
-    let localPort = process.env.TUNNEL_LOCAL_PORT ?? String(DEFAULT_CLI_TARGET_PORT);
-    let tunnelId = process.env.TUNNEL_ID ?? "demo";
-    let tunnelServerBaseUrl = process.env.TUNNEL_SERVER_URL ?? "ws://localhost:8080";
-    let authToken = process.env.TUNNEL_AUTH_TOKEN ?? DEFAULT_AUTH_TOKEN;
+    let command = args[0];
+    let localPort = process.env.PORTLEX_LOCAL_PORT ?? String(DEFAULT_CLI_TARGET_PORT);
+    let tunnelServerBaseUrl = process.env.PORTLEX_SERVER_URL ?? process.env.TUNNEL_SERVER_URL ?? "ws://localhost:8080";
+    let authToken = process.env.PORTLEX_AUTH_TOKEN ?? process.env.TUNNEL_AUTH_TOKEN ?? DEFAULT_AUTH_TOKEN;
 
-    for (let index = 0; index < args.length; index++) {
+    if (!command || command === "--help" || command === "-h") {
+        printHelp();
+        process.exit(command ? 0 : 1);
+    }
+
+    if (command !== "http") {
+        console.error(`Unknown command: ${command}`);
+        console.error("Run portlex --help for usage.");
+        process.exit(1);
+    }
+
+    for (let index = 1; index < args.length; index++) {
         const arg = args[index];
 
         if (arg === "--help" || arg === "-h") {
@@ -72,12 +82,6 @@ function parseCliArgs(args: string[]): CliConfig {
 
         if (arg === "--port" || arg === "-p") {
             localPort = readOptionValue(args, index, arg);
-            index++;
-            continue;
-        }
-
-        if (arg === "--name" || arg === "--id" || arg === "-n") {
-            tunnelId = readOptionValue(args, index, arg);
             index++;
             continue;
         }
@@ -96,7 +100,7 @@ function parseCliArgs(args: string[]): CliConfig {
 
         if (arg.startsWith("-")) {
             console.error(`Unknown option: ${arg}`);
-            console.error("Run tunnel --help for usage.");
+            console.error("Run portlex --help for usage.");
             process.exit(1);
         }
 
@@ -104,25 +108,25 @@ function parseCliArgs(args: string[]): CliConfig {
     }
 
     localPort = positionalArgs[0] ?? localPort;
-    tunnelId = positionalArgs[1] ?? tunnelId;
 
     return {
+        command,
         localPort: Number(localPort),
-        tunnelId,
         tunnelServerBaseUrl,
         authToken,
     };
 }
 
 const config = parseCliArgs(process.argv.slice(2));
-const { localPort, tunnelId, tunnelServerBaseUrl, authToken } = config;
+const { localPort, tunnelServerBaseUrl, authToken } = config;
 const localTargetUrl = `http://localhost:${localPort}`;
 const reconnectDelayMs = 1_000;
+let activeSocket: WebSocket | null = null;
+let isShuttingDown = false;
 
 function buildTunnelServerUrl() {
     const url = new URL("/tunnel", tunnelServerBaseUrl);
 
-    url.searchParams.set("id", tunnelId);
     url.searchParams.set("token", authToken);
 
     return url.toString();
@@ -149,15 +153,10 @@ if (!isValidPort(localPort)) {
     process.exit(1);
 }
 
-if (!isValidTunnelId(tunnelId)) {
-    console.error("Tunnel id must be 3-40 characters and only use letters, numbers, dashes, or underscores");
-    process.exit(1);
-}
-
 try {
     new URL(tunnelServerBaseUrl);
 } catch {
-    console.error("Tunnel server URL must be a valid URL, like ws://localhost:8080");
+    console.error("Portlex server URL must be a valid URL, like ws://localhost:8080");
     process.exit(1);
 }
 
@@ -201,11 +200,11 @@ async function forwardToLocalApp(message: TunnelRequestMessage): Promise<TunnelR
 function connect() {
     const tunnelServerUrl = buildTunnelServerUrl();
     const socket = new WebSocket(tunnelServerUrl);
+    activeSocket = socket;
 
     socket.addEventListener("open", () => {
-        console.log(`Connected to tunnel server at ${tunnelServerBaseUrl}`);
+        console.log(`Connected to Portlex server at ${tunnelServerBaseUrl}`);
         console.log(`Forwarding requests to ${localTargetUrl}`);
-        console.log(`Tunnel id: ${tunnelId}`);
     });
 
     socket.addEventListener("message", async (event) => {
@@ -232,13 +231,40 @@ function connect() {
     });
 
     socket.addEventListener("close", () => {
-        console.log(`Disconnected from tunnel server. Reconnecting in ${reconnectDelayMs}ms...`);
+        if (activeSocket === socket) {
+            activeSocket = null;
+        }
+
+        if (isShuttingDown) {
+            return;
+        }
+
+        console.log(`Disconnected from Portlex server. Reconnecting in ${reconnectDelayMs}ms...`);
         setTimeout(connect, reconnectDelayMs);
     });
 
     socket.addEventListener("error", () => {
-        console.log("Could not connect to tunnel server");
+        console.log("Could not connect to Portlex server");
     });
 }
+
+function shutdown() {
+    if (isShuttingDown) {
+        return;
+    }
+
+    isShuttingDown = true;
+    console.log("Closing tunnel...");
+
+    if (activeSocket && activeSocket.readyState === WebSocket.OPEN) {
+        activeSocket.close();
+    }
+
+    console.log("Tunnel closed");
+    process.exit(0);
+}
+
+process.on("SIGINT", shutdown);
+process.on("SIGTERM", shutdown);
 
 connect();

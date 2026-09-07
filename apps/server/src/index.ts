@@ -5,49 +5,34 @@ import {
     REQUEST_TIMEOUT_MS,
     filterForwardHeaders,
     isValidPort,
-    isValidTunnelId,
     requestBodyToBase64,
     type ClientMessage,
 } from "../../../packages/protocol/src/index";
 
-type TunnelClientData = {
-    tunnelId: string;
-};
-
 type PendingRequest = {
-    tunnelId: string;
     resolve: (response: Response) => void;
     timeout: ReturnType<typeof setTimeout>;
 };
 
-const tunnelClients = new Map<string, ServerWebSocket<TunnelClientData>>();
+type TunnelRecord = {
+    socket: ServerWebSocket<unknown>;
+    connectedAt: string;
+    requestCount: number;
+    lastRequestAt: string | null;
+};
+
 const pendingRequests = new Map<string, PendingRequest>();
-const authToken = process.env.TUNNEL_AUTH_TOKEN ?? DEFAULT_AUTH_TOKEN;
+const authToken = process.env.PORTLEX_AUTH_TOKEN ?? process.env.TUNNEL_AUTH_TOKEN ?? DEFAULT_AUTH_TOKEN;
 const requestedPort = Number(process.env.PORT ?? String(DEFAULT_SERVER_PORT));
 const port = isValidPort(requestedPort) ? requestedPort : DEFAULT_SERVER_PORT;
+let activeTunnel: TunnelRecord | null = null;
+let isShuttingDown = false;
 
 function createRequestId() {
     return crypto.randomUUID();
 }
 
-function getTunnelIdFromPath(pathname: string) {
-    const [, prefix, tunnelId] = pathname.split("/");
-
-    if (prefix !== "t" || !tunnelId) {
-        return null;
-    }
-
-    return tunnelId;
-}
-
-function getForwardPath(pathname: string, search: string) {
-    const [, , , ...forwardPathParts] = pathname.split("/");
-    const forwardPath = `/${forwardPathParts.join("/")}`;
-
-    return `${forwardPath}${search}`;
-}
-
-function waitForTunnelResponse(requestId: string, tunnelId: string) {
+function waitForTunnelResponse(requestId: string) {
     return new Promise<Response>((resolve) => {
         const timeout = setTimeout(() => {
             pendingRequests.delete(requestId);
@@ -60,25 +45,20 @@ function waitForTunnelResponse(requestId: string, tunnelId: string) {
         }, REQUEST_TIMEOUT_MS);
 
         pendingRequests.set(requestId, {
-            tunnelId,
             resolve,
             timeout,
         });
     });
 }
 
-function failPendingRequestsForTunnel(tunnelId: string) {
+function failPendingRequests(message: string, status: number) {
     for (const [requestId, pendingRequest] of pendingRequests.entries()) {
-        if (pendingRequest.tunnelId !== tunnelId) {
-            continue;
-        }
-
         clearTimeout(pendingRequest.timeout);
         pendingRequests.delete(requestId);
 
         pendingRequest.resolve(
-            new Response("Tunnel client disconnected", {
-                status: 502,
+            new Response(message, {
+                status,
             })
         );
     }
@@ -92,21 +72,49 @@ function parseClientMessage(message: string | Buffer) {
     }
 }
 
+function getStatus() {
+    return {
+        status: "ok",
+        activeConnection: activeTunnel
+            ? {
+                  connectedAt: activeTunnel.connectedAt,
+                  requestCount: activeTunnel.requestCount,
+                  lastRequestAt: activeTunnel.lastRequestAt,
+              }
+            : null,
+        pendingRequests: pendingRequests.size,
+    };
+}
+
+function shutdown() {
+    if (isShuttingDown) {
+        return;
+    }
+
+    isShuttingDown = true;
+    console.log("Shutting down Portlex server...");
+
+    activeTunnel?.socket.close();
+    activeTunnel = null;
+    failPendingRequests("Portlex server shutting down", 503);
+
+    server.stop();
+    console.log("Portlex server stopped");
+    process.exit(0);
+}
+
 const server = Bun.serve({
     port,
 
     async fetch(req, server) {
         const url = new URL(req.url);
 
-        if (url.pathname === "/tunnel") {
-            const tunnelId = url.searchParams.get("id");
-            const token = url.searchParams.get("token");
+        if (url.pathname === "/_status") {
+            return Response.json(getStatus());
+        }
 
-            if (!tunnelId) {
-                return new Response("Missing tunnel id", {
-                    status: 400,
-                });
-            }
+        if (url.pathname === "/tunnel") {
+            const token = url.searchParams.get("token");
 
             if (token !== authToken) {
                 return new Response("Invalid tunnel auth token", {
@@ -114,23 +122,13 @@ const server = Bun.serve({
                 });
             }
 
-            if (!isValidTunnelId(tunnelId)) {
-                return new Response("Tunnel id must be 3-40 characters and only use letters, numbers, dashes, or underscores", {
-                    status: 400,
-                });
-            }
-
-            if (tunnelClients.has(tunnelId)) {
-                return new Response(`Tunnel id "${tunnelId}" is already connected`, {
+            if (activeTunnel) {
+                return new Response("A tunnel client is already connected", {
                     status: 409,
                 });
             }
 
-            const upgraded = server.upgrade(req, {
-                data: {
-                    tunnelId,
-                },
-            });
+            const upgraded = server.upgrade(req);
 
             if (upgraded) {
                 return;
@@ -141,24 +139,8 @@ const server = Bun.serve({
             });
         }
 
-        const tunnelId = getTunnelIdFromPath(url.pathname);
-
-        if (!tunnelId) {
-            return new Response("Use /t/:tunnelId to reach a tunnel", {
-                status: 404,
-            });
-        }
-
-        if (!isValidTunnelId(tunnelId)) {
-            return new Response("Invalid tunnel id", {
-                status: 400,
-            });
-        }
-
-        const tunnelClient = tunnelClients.get(tunnelId);
-
-        if (!tunnelClient) {
-            return new Response(`No tunnel client connected for "${tunnelId}"`, {
+        if (!activeTunnel) {
+            return new Response("No tunnel client connected", {
                 status: 503,
             });
         }
@@ -172,30 +154,39 @@ const server = Bun.serve({
         }
 
         const requestId = createRequestId();
+        activeTunnel.requestCount++;
+        activeTunnel.lastRequestAt = new Date().toISOString();
 
-        tunnelClient.send(
+        activeTunnel.socket.send(
             JSON.stringify({
                 type: "http_request",
                 requestId,
                 method: req.method,
-                path: getForwardPath(url.pathname, url.search),
+                path: `${url.pathname}${url.search}`,
                 headers: filterForwardHeaders(req.headers),
                 bodyBase64,
             })
         );
 
-        return waitForTunnelResponse(requestId, tunnelId);
+        return waitForTunnelResponse(requestId);
     },
 
     websocket: {
         open(ws) {
-            tunnelClients.set(ws.data.tunnelId, ws);
-            console.log(`Tunnel client connected: ${ws.data.tunnelId}`);
+            activeTunnel = {
+                socket: ws,
+                connectedAt: new Date().toISOString(),
+                requestCount: 0,
+                lastRequestAt: null,
+            };
+
+            console.log("Tunnel client connected");
 
             ws.send(
                 JSON.stringify({
                     type: "connected",
-                    message: `Tunnel ready at http://localhost:${server.port}/t/${ws.data.tunnelId}`,
+                    message: `Tunnel ready at http://localhost:${server.port}`,
+                    publicUrl: `http://localhost:${server.port}`,
                 })
             );
         },
@@ -225,12 +216,17 @@ const server = Bun.serve({
         },
 
         close(ws) {
-            tunnelClients.delete(ws.data.tunnelId);
-            failPendingRequestsForTunnel(ws.data.tunnelId);
+            if (activeTunnel?.socket === ws) {
+                activeTunnel = null;
+                failPendingRequests("Tunnel client disconnected", 502);
+            }
 
-            console.log(`Tunnel client disconnected: ${ws.data.tunnelId}`);
+            console.log("Tunnel client disconnected");
         },
     },
 });
 
-console.log(`Tunnel server running on http://localhost:${server.port}`);
+console.log(`Portlex server running on http://localhost:${server.port}`);
+
+process.on("SIGINT", shutdown);
+process.on("SIGTERM", shutdown);
