@@ -15,13 +15,19 @@ type TunnelResponseMessage = {
     body: string;
 };
 
+type TunnelClientData = {
+    tunnelId: string;
+};
+
 type PendingRequest = {
     resolve: (response: Response) => void;
     timeout: ReturnType<typeof setTimeout>;
 };
 
-let tunnelClient: ServerWebSocket<unknown> | null = null;
+const tunnelClients = new Map<string, ServerWebSocket<TunnelClientData>>();
 const pendingRequests = new Map<string, PendingRequest>();
+const authToken = process.env.TUNNEL_AUTH_TOKEN ?? "dev-token";
+const port = Number(process.env.PORT ?? "8080");
 
 function createRequestId() {
     return crypto.randomUUID();
@@ -29,6 +35,31 @@ function createRequestId() {
 
 function headersToObject(headers: Headers) {
     return Object.fromEntries(headers.entries());
+}
+
+function isValidTunnelId(tunnelId: string) {
+    return /^[a-zA-Z0-9_-]{3,40}$/.test(tunnelId);
+}
+
+function isValidPort(port: number) {
+    return Number.isInteger(port) && port > 0 && port < 65_536;
+}
+
+function getTunnelIdFromPath(pathname: string) {
+    const [, prefix, tunnelId] = pathname.split("/");
+
+    if (prefix !== "t" || !tunnelId) {
+        return null;
+    }
+
+    return tunnelId;
+}
+
+function getForwardPath(pathname: string, search: string) {
+    const [, , , ...forwardPathParts] = pathname.split("/");
+    const forwardPath = `/${forwardPathParts.join("/")}`;
+
+    return `${forwardPath}${search}`;
 }
 
 function waitForTunnelResponse(requestId: string) {
@@ -51,13 +82,44 @@ function waitForTunnelResponse(requestId: string) {
 }
 
 const server = Bun.serve({
-    port: 8080,
+    port: isValidPort(port) ? port : 8080,
 
     async fetch(req, server) {
         const url = new URL(req.url);
 
         if (url.pathname === "/tunnel") {
-            const upgraded = server.upgrade(req);
+            const tunnelId = url.searchParams.get("id");
+            const token = url.searchParams.get("token");
+
+            if (!tunnelId) {
+                return new Response("Missing tunnel id", {
+                    status: 400,
+                });
+            }
+
+            if (token !== authToken) {
+                return new Response("Invalid tunnel auth token", {
+                    status: 401,
+                });
+            }
+
+            if (!isValidTunnelId(tunnelId)) {
+                return new Response("Tunnel id must be 3-40 characters and only use letters, numbers, dashes, or underscores", {
+                    status: 400,
+                });
+            }
+
+            if (tunnelClients.has(tunnelId)) {
+                return new Response(`Tunnel id "${tunnelId}" is already connected`, {
+                    status: 409,
+                });
+            }
+
+            const upgraded = server.upgrade(req, {
+                data: {
+                    tunnelId,
+                },
+            });
 
             if (upgraded) {
                 return;
@@ -68,8 +130,24 @@ const server = Bun.serve({
             });
         }
 
+        const tunnelId = getTunnelIdFromPath(url.pathname);
+
+        if (!tunnelId) {
+            return new Response("Use /t/:tunnelId to reach a tunnel", {
+                status: 404,
+            });
+        }
+
+        if (!isValidTunnelId(tunnelId)) {
+            return new Response("Invalid tunnel id", {
+                status: 400,
+            });
+        }
+
+        const tunnelClient = tunnelClients.get(tunnelId);
+
         if (!tunnelClient) {
-            return new Response("No tunnel client connected", {
+            return new Response(`No tunnel client connected for "${tunnelId}"`, {
                 status: 503,
             });
         }
@@ -80,7 +158,7 @@ const server = Bun.serve({
             type: "http_request",
             requestId,
             method: req.method,
-            path: `${url.pathname}${url.search}`,
+            path: getForwardPath(url.pathname, url.search),
             headers: headersToObject(req.headers),
             body,
         };
@@ -92,13 +170,13 @@ const server = Bun.serve({
 
     websocket: {
         open(ws) {
-            tunnelClient = ws;
-            console.log("Tunnel client connected");
+            tunnelClients.set(ws.data.tunnelId, ws);
+            console.log(`Tunnel client connected: ${ws.data.tunnelId}`);
 
             ws.send(
                 JSON.stringify({
                     type: "connected",
-                    message: "Connected to tunnel server",
+                    message: `Tunnel ready at http://localhost:${server.port}/t/${ws.data.tunnelId}`,
                 })
             );
         },
@@ -128,11 +206,9 @@ const server = Bun.serve({
         },
 
         close(ws) {
-            if (tunnelClient === ws) {
-                tunnelClient = null;
-            }
+            tunnelClients.delete(ws.data.tunnelId);
 
-            console.log("Tunnel client disconnected");
+            console.log(`Tunnel client disconnected: ${ws.data.tunnelId}`);
         },
     },
 });
