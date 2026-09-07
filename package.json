@@ -3,9 +3,13 @@
   "module": "index.ts",
   "type": "module",
   "private": true,
+  "bin": {
+    "tunnel": "./apps/cli/src/index.ts"
+  },
   "scripts": {
     "server": "bun run apps/server/src/index.ts",
-    "cli": "bun run apps/cli/src/index.ts"
+    "cli": "bun run apps/cli/src/index.ts",
+    "tunnel": "bun run apps/cli/src/index.ts"
   },
   "devDependencies": {
     "@types/bun": "latest"

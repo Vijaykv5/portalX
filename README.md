@@ -35,6 +35,12 @@ Start the tunnel CLI:
 TUNNEL_SERVER_URL=ws://localhost:8081 bun run cli -- 3000 demo
 ```
 
+You can also use the more CLI-like form:
+
+```bash
+TUNNEL_SERVER_URL=ws://localhost:8081 bun run tunnel -- --port 3000 --name demo
+```
+
 Open:
 
 ```txt
@@ -77,6 +83,21 @@ Arguments:
 
 ```txt
 bun run cli -- <local-port> <tunnel-id>
+```
+
+CLI options:
+
+```bash
+bun run tunnel -- --help
+bun run tunnel -- 3000 demo
+bun run tunnel -- --port 5173 --name vite --server ws://localhost:8081
+```
+
+When installed as a package binary, the command shape becomes:
+
+```bash
+tunnel 3000 demo
+tunnel --port 5173 --name vite --server ws://localhost:8081
 ```
 
 Examples:

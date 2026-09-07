@@ -1,3 +1,5 @@
+#!/usr/bin/env bun
+
 import {
     DEFAULT_AUTH_TOKEN,
     DEFAULT_CLI_TARGET_PORT,
@@ -11,10 +13,109 @@ import {
     type TunnelResponseMessage,
 } from "../../../packages/protocol/src/index";
 
-const localPort = Number(process.argv[2] ?? String(DEFAULT_CLI_TARGET_PORT));
-const tunnelId = process.argv[3] ?? "demo";
-const tunnelServerBaseUrl = process.env.TUNNEL_SERVER_URL ?? "ws://localhost:8080";
-const authToken = process.env.TUNNEL_AUTH_TOKEN ?? DEFAULT_AUTH_TOKEN;
+type CliConfig = {
+    localPort: number;
+    tunnelId: string;
+    tunnelServerBaseUrl: string;
+    authToken: string;
+};
+
+function printHelp() {
+    console.log(`Tunnel
+
+Usage:
+  tunnel <port> [tunnel-id]
+  tunnel --port <port> --name <tunnel-id>
+
+Options:
+  -p, --port <port>      Local port to forward to
+  -n, --name <id>        Tunnel ID used in /t/:id
+  -s, --server <url>     Tunnel server URL
+      --token <token>    Auth token for the tunnel server
+  -h, --help             Show help
+
+Environment:
+  TUNNEL_SERVER_URL      Defaults to ws://localhost:8080
+  TUNNEL_AUTH_TOKEN      Defaults to dev-token
+
+Examples:
+  tunnel 3000 demo
+  tunnel --port 5173 --name vite --server ws://localhost:8081
+`);
+}
+
+function readOptionValue(args: string[], index: number, optionName: string) {
+    const value = args[index + 1];
+
+    if (!value || value.startsWith("-")) {
+        console.error(`${optionName} requires a value`);
+        process.exit(1);
+    }
+
+    return value;
+}
+
+function parseCliArgs(args: string[]): CliConfig {
+    const positionalArgs: string[] = [];
+    let localPort = process.env.TUNNEL_LOCAL_PORT ?? String(DEFAULT_CLI_TARGET_PORT);
+    let tunnelId = process.env.TUNNEL_ID ?? "demo";
+    let tunnelServerBaseUrl = process.env.TUNNEL_SERVER_URL ?? "ws://localhost:8080";
+    let authToken = process.env.TUNNEL_AUTH_TOKEN ?? DEFAULT_AUTH_TOKEN;
+
+    for (let index = 0; index < args.length; index++) {
+        const arg = args[index];
+
+        if (arg === "--help" || arg === "-h") {
+            printHelp();
+            process.exit(0);
+        }
+
+        if (arg === "--port" || arg === "-p") {
+            localPort = readOptionValue(args, index, arg);
+            index++;
+            continue;
+        }
+
+        if (arg === "--name" || arg === "--id" || arg === "-n") {
+            tunnelId = readOptionValue(args, index, arg);
+            index++;
+            continue;
+        }
+
+        if (arg === "--server" || arg === "-s") {
+            tunnelServerBaseUrl = readOptionValue(args, index, arg);
+            index++;
+            continue;
+        }
+
+        if (arg === "--token") {
+            authToken = readOptionValue(args, index, arg);
+            index++;
+            continue;
+        }
+
+        if (arg.startsWith("-")) {
+            console.error(`Unknown option: ${arg}`);
+            console.error("Run tunnel --help for usage.");
+            process.exit(1);
+        }
+
+        positionalArgs.push(arg);
+    }
+
+    localPort = positionalArgs[0] ?? localPort;
+    tunnelId = positionalArgs[1] ?? tunnelId;
+
+    return {
+        localPort: Number(localPort),
+        tunnelId,
+        tunnelServerBaseUrl,
+        authToken,
+    };
+}
+
+const config = parseCliArgs(process.argv.slice(2));
+const { localPort, tunnelId, tunnelServerBaseUrl, authToken } = config;
 const localTargetUrl = `http://localhost:${localPort}`;
 const reconnectDelayMs = 1_000;
 
@@ -50,6 +151,13 @@ if (!isValidPort(localPort)) {
 
 if (!isValidTunnelId(tunnelId)) {
     console.error("Tunnel id must be 3-40 characters and only use letters, numbers, dashes, or underscores");
+    process.exit(1);
+}
+
+try {
+    new URL(tunnelServerBaseUrl);
+} catch {
+    console.error("Tunnel server URL must be a valid URL, like ws://localhost:8080");
     process.exit(1);
 }
 
