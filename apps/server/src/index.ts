@@ -1,48 +1,33 @@
-type TunnelRequestMessage = {
-    type: "http_request";
-    requestId: string;
-    method: string;
-    path: string;
-    headers: Record<string, string>;
-    body: string;
-};
-
-type TunnelResponseMessage = {
-    type: "http_response";
-    requestId: string;
-    status: number;
-    headers: Record<string, string>;
-    body: string;
-};
+import {
+    DEFAULT_AUTH_TOKEN,
+    DEFAULT_SERVER_PORT,
+    MAX_BODY_BYTES,
+    REQUEST_TIMEOUT_MS,
+    filterForwardHeaders,
+    isValidPort,
+    isValidTunnelId,
+    requestBodyToBase64,
+    type ClientMessage,
+} from "../../../packages/protocol/src/index";
 
 type TunnelClientData = {
     tunnelId: string;
 };
 
 type PendingRequest = {
+    tunnelId: string;
     resolve: (response: Response) => void;
     timeout: ReturnType<typeof setTimeout>;
 };
 
 const tunnelClients = new Map<string, ServerWebSocket<TunnelClientData>>();
 const pendingRequests = new Map<string, PendingRequest>();
-const authToken = process.env.TUNNEL_AUTH_TOKEN ?? "dev-token";
-const port = Number(process.env.PORT ?? "8080");
+const authToken = process.env.TUNNEL_AUTH_TOKEN ?? DEFAULT_AUTH_TOKEN;
+const requestedPort = Number(process.env.PORT ?? String(DEFAULT_SERVER_PORT));
+const port = isValidPort(requestedPort) ? requestedPort : DEFAULT_SERVER_PORT;
 
 function createRequestId() {
     return crypto.randomUUID();
-}
-
-function headersToObject(headers: Headers) {
-    return Object.fromEntries(headers.entries());
-}
-
-function isValidTunnelId(tunnelId: string) {
-    return /^[a-zA-Z0-9_-]{3,40}$/.test(tunnelId);
-}
-
-function isValidPort(port: number) {
-    return Number.isInteger(port) && port > 0 && port < 65_536;
 }
 
 function getTunnelIdFromPath(pathname: string) {
@@ -62,7 +47,7 @@ function getForwardPath(pathname: string, search: string) {
     return `${forwardPath}${search}`;
 }
 
-function waitForTunnelResponse(requestId: string) {
+function waitForTunnelResponse(requestId: string, tunnelId: string) {
     return new Promise<Response>((resolve) => {
         const timeout = setTimeout(() => {
             pendingRequests.delete(requestId);
@@ -72,17 +57,43 @@ function waitForTunnelResponse(requestId: string) {
                     status: 504,
                 })
             );
-        }, 10_000);
+        }, REQUEST_TIMEOUT_MS);
 
         pendingRequests.set(requestId, {
+            tunnelId,
             resolve,
             timeout,
         });
     });
 }
 
+function failPendingRequestsForTunnel(tunnelId: string) {
+    for (const [requestId, pendingRequest] of pendingRequests.entries()) {
+        if (pendingRequest.tunnelId !== tunnelId) {
+            continue;
+        }
+
+        clearTimeout(pendingRequest.timeout);
+        pendingRequests.delete(requestId);
+
+        pendingRequest.resolve(
+            new Response("Tunnel client disconnected", {
+                status: 502,
+            })
+        );
+    }
+}
+
+function parseClientMessage(message: string | Buffer) {
+    try {
+        return JSON.parse(String(message)) as ClientMessage;
+    } catch {
+        return null;
+    }
+}
+
 const server = Bun.serve({
-    port: isValidPort(port) ? port : 8080,
+    port,
 
     async fetch(req, server) {
         const url = new URL(req.url);
@@ -152,20 +163,28 @@ const server = Bun.serve({
             });
         }
 
+        const bodyBase64 = await requestBodyToBase64(req);
+
+        if (bodyBase64 === null) {
+            return new Response(`Request body is too large. Limit is ${MAX_BODY_BYTES} bytes.`, {
+                status: 413,
+            });
+        }
+
         const requestId = createRequestId();
-        const body = await req.text();
-        const tunnelRequest: TunnelRequestMessage = {
-            type: "http_request",
-            requestId,
-            method: req.method,
-            path: getForwardPath(url.pathname, url.search),
-            headers: headersToObject(req.headers),
-            body,
-        };
 
-        tunnelClient.send(JSON.stringify(tunnelRequest));
+        tunnelClient.send(
+            JSON.stringify({
+                type: "http_request",
+                requestId,
+                method: req.method,
+                path: getForwardPath(url.pathname, url.search),
+                headers: filterForwardHeaders(req.headers),
+                bodyBase64,
+            })
+        );
 
-        return waitForTunnelResponse(requestId);
+        return waitForTunnelResponse(requestId, tunnelId);
     },
 
     websocket: {
@@ -182,9 +201,9 @@ const server = Bun.serve({
         },
 
         message(_ws, message) {
-            const parsedMessage = JSON.parse(String(message)) as TunnelResponseMessage;
+            const parsedMessage = parseClientMessage(message);
 
-            if (parsedMessage.type !== "http_response") {
+            if (!parsedMessage || parsedMessage.type !== "http_response") {
                 return;
             }
 
@@ -198,15 +217,16 @@ const server = Bun.serve({
             pendingRequests.delete(parsedMessage.requestId);
 
             pendingRequest.resolve(
-                new Response(parsedMessage.body, {
+                new Response(Buffer.from(parsedMessage.bodyBase64, "base64"), {
                     status: parsedMessage.status,
-                    headers: parsedMessage.headers,
+                    headers: filterForwardHeaders(new Headers(parsedMessage.headers)),
                 })
             );
         },
 
         close(ws) {
             tunnelClients.delete(ws.data.tunnelId);
+            failPendingRequestsForTunnel(ws.data.tunnelId);
 
             console.log(`Tunnel client disconnected: ${ws.data.tunnelId}`);
         },
