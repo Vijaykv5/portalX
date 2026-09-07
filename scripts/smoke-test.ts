@@ -3,6 +3,7 @@ const localAppPort = 30_000 + Math.floor(Math.random() * 10_000);
 const tunnelServerUrl = `http://localhost:${tunnelServerPort}`;
 const tunnelServerWsUrl = `ws://localhost:${tunnelServerPort}`;
 const localAppUrl = `http://localhost:${localAppPort}`;
+const configPath = `/tmp/portlex-smoke-${Date.now()}.json`;
 const processes: Subprocess[] = [];
 
 type Subprocess = ReturnType<typeof Bun.spawn>;
@@ -23,6 +24,28 @@ function spawnProcess(command: string[], env?: Record<string, string>) {
 
     processes.push(subprocess);
     return subprocess;
+}
+
+async function runCommand(command: string[], env?: Record<string, string>) {
+    const subprocess = Bun.spawn(command, {
+        stdout: "pipe",
+        stderr: "pipe",
+        env: {
+            ...process.env,
+            ...env,
+        },
+    });
+    const [stdout, stderr, exitCode] = await Promise.all([
+        new Response(subprocess.stdout).text(),
+        new Response(subprocess.stderr).text(),
+        subprocess.exited,
+    ]);
+
+    return {
+        stdout,
+        stderr,
+        exitCode,
+    };
 }
 
 async function waitForHttp(url: string) {
@@ -70,13 +93,27 @@ try {
         [
             "bun",
             "--eval",
-            `Bun.serve({ port: ${localAppPort}, async fetch(req) { const url = new URL(req.url); const body = await req.text(); return Response.json({ method: req.method, path: url.pathname, search: url.search, body }); } }); console.log("local app ready");`,
+            `Bun.serve({ port: ${localAppPort}, async fetch(req) { const url = new URL(req.url); if (url.pathname === "/slow") await new Promise(resolve => setTimeout(resolve, 500)); const body = await req.text(); return Response.json({ method: req.method, path: url.pathname, search: url.search, body }); } }); console.log("local app ready");`,
         ],
     );
     await waitForHttp(`${localAppUrl}/health`);
 
+    const versionResult = await runCommand(["bun", "run", "cli", "--", "--version"]);
+    assert(versionResult.exitCode === 0, "Version command should exit cleanly");
+    assert(versionResult.stdout.trim() === "portlex 0.1.0", "Version command should print the current version");
+
+    await Bun.write(
+        configPath,
+        JSON.stringify({
+            localPort: localAppPort,
+            serverUrl: tunnelServerWsUrl,
+            authToken: "dev-token",
+        })
+    );
+
     spawnProcess(["bun", "run", "server"], {
         PORT: String(tunnelServerPort),
+        PORTLEX_REQUEST_TIMEOUT_MS: "100",
     });
     await waitForHttp(`${tunnelServerUrl}/_status`);
 
@@ -93,8 +130,8 @@ try {
     const availableConnectionCheckResponse = await fetch(`${tunnelServerUrl}/_connect-check?token=dev-token`);
     assert(availableConnectionCheckResponse.status === 200, "Connect check should allow an open slot");
 
-    spawnProcess(["bun", "run", "cli", "--", "http", String(localAppPort)], {
-        PORTLEX_SERVER_URL: tunnelServerWsUrl,
+    spawnProcess(["bun", "run", "cli", "--", "http"], {
+        PORTLEX_CONFIG: configPath,
     });
     await waitForTunnel();
 
@@ -143,7 +180,11 @@ try {
 
     assert(largeResponse.status === 413, "Oversized request should return 413");
 
+    const timeoutResponse = await fetch(`${tunnelServerUrl}/slow`);
+    assert(timeoutResponse.status === 504, "Slow local responses should return 504");
+
     console.log("Smoke test passed");
 } finally {
+    await Bun.file(configPath).delete().catch(() => {});
     await cleanup();
 }

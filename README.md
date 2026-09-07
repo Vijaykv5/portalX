@@ -89,6 +89,7 @@ CLI options:
 
 ```bash
 bun run portlex -- --help
+bun run portlex -- --version
 bun run portlex -- http 3000
 bun run portlex -- http --port 5173 --server ws://localhost:8081
 ```
@@ -109,6 +110,36 @@ bun run portlex -- http 8000
 ```
 
 Only one CLI connection can be active at a time. If another terminal tries to run `portlex http 3001` while `portlex http 3000` is already connected, the server rejects the second connection.
+
+## Config File
+
+Portlex reads optional defaults from:
+
+```txt
+~/.portlex/config.json
+```
+
+Example:
+
+```json
+{
+  "localPort": 3000,
+  "serverUrl": "ws://localhost:8081",
+  "authToken": "dev-token"
+}
+```
+
+You can point to a different config file with:
+
+```bash
+PORTLEX_CONFIG=/path/to/config.json portlex http
+```
+
+Precedence is:
+
+```txt
+defaults -> config file -> environment variables -> CLI flags
+```
 
 ## Status
 

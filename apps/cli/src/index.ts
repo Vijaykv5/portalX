@@ -1,5 +1,8 @@
 #!/usr/bin/env bun
 
+import { existsSync, readFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import {
     DEFAULT_AUTH_TOKEN,
     DEFAULT_CLI_TARGET_PORT,
@@ -13,6 +16,8 @@ import {
     type TunnelResponseMessage,
 } from "../../../packages/protocol/src/index";
 
+const VERSION = "0.1.0";
+
 type CliConfig = {
     command: "http";
     localPort: number;
@@ -20,8 +25,14 @@ type CliConfig = {
     authToken: string;
 };
 
+type FileConfig = {
+    localPort?: number | string;
+    serverUrl?: string;
+    authToken?: string;
+};
+
 function printHelp() {
-    console.log(`Portlex
+    console.log(`Portlex ${VERSION}
 
 Usage:
   portlex http <port>
@@ -31,7 +42,12 @@ Options:
   -p, --port <port>      Local port to forward to
   -s, --server <url>     Portlex server URL
       --token <token>    Auth token for the Portlex server
+  -v, --version          Show version
   -h, --help             Show help
+
+Config:
+  ~/.portlex/config.json
+  PORTLEX_CONFIG         Override config file path
 
 Environment:
   PORTLEX_SERVER_URL     Defaults to ws://localhost:8080
@@ -42,6 +58,29 @@ Examples:
   portlex http 3000
   portlex http --port 5173 --server ws://localhost:8081
 `);
+}
+
+function printVersion() {
+    console.log(`portlex ${VERSION}`);
+}
+
+function getConfigPath() {
+    return process.env.PORTLEX_CONFIG ?? join(homedir(), ".portlex", "config.json");
+}
+
+function readFileConfig(): FileConfig {
+    const configPath = getConfigPath();
+
+    if (!existsSync(configPath)) {
+        return {};
+    }
+
+    try {
+        return JSON.parse(readFileSync(configPath, "utf8")) as FileConfig;
+    } catch {
+        console.error(`Could not read Portlex config at ${configPath}`);
+        process.exit(1);
+    }
 }
 
 function readOptionValue(args: string[], index: number, optionName: string) {
@@ -56,11 +95,17 @@ function readOptionValue(args: string[], index: number, optionName: string) {
 }
 
 function parseCliArgs(args: string[]): CliConfig {
+    const fileConfig = readFileConfig();
     const positionalArgs: string[] = [];
     let command = args[0];
-    let localPort = process.env.PORTLEX_LOCAL_PORT ?? String(DEFAULT_CLI_TARGET_PORT);
-    let tunnelServerBaseUrl = process.env.PORTLEX_SERVER_URL ?? process.env.TUNNEL_SERVER_URL ?? "ws://localhost:8080";
-    let authToken = process.env.PORTLEX_AUTH_TOKEN ?? process.env.TUNNEL_AUTH_TOKEN ?? DEFAULT_AUTH_TOKEN;
+    let localPort = process.env.PORTLEX_LOCAL_PORT ?? String(fileConfig.localPort ?? DEFAULT_CLI_TARGET_PORT);
+    let tunnelServerBaseUrl = process.env.PORTLEX_SERVER_URL ?? process.env.TUNNEL_SERVER_URL ?? fileConfig.serverUrl ?? "ws://localhost:8080";
+    let authToken = process.env.PORTLEX_AUTH_TOKEN ?? process.env.TUNNEL_AUTH_TOKEN ?? fileConfig.authToken ?? DEFAULT_AUTH_TOKEN;
+
+    if (command === "--version" || command === "-v") {
+        printVersion();
+        process.exit(0);
+    }
 
     if (!command || command === "--help" || command === "-h") {
         printHelp();
@@ -78,6 +123,11 @@ function parseCliArgs(args: string[]): CliConfig {
 
         if (arg === "--help" || arg === "-h") {
             printHelp();
+            process.exit(0);
+        }
+
+        if (arg === "--version" || arg === "-v") {
+            printVersion();
             process.exit(0);
         }
 
@@ -124,6 +174,24 @@ const localTargetUrl = `http://localhost:${localPort}`;
 const reconnectDelayMs = 1_000;
 let activeSocket: WebSocket | null = null;
 let isShuttingDown = false;
+
+function printStartup(publicUrl?: string) {
+    console.log("");
+    console.log(`Portlex ${VERSION}`);
+    console.log(`Local:   ${localTargetUrl}`);
+    console.log(`Server:  ${tunnelServerBaseUrl}`);
+
+    if (publicUrl) {
+        console.log(`Public:  ${publicUrl}`);
+    }
+
+    console.log("Status:  connected");
+    console.log("");
+}
+
+function logRequest(method: string, path: string, status: number, durationMs: number) {
+    console.log(`${method.padEnd(6)} ${String(status).padEnd(3)} ${String(`${durationMs}ms`).padStart(6)}  ${path}`);
+}
 
 function buildTunnelServerUrl() {
     const url = new URL("/tunnel", tunnelServerBaseUrl);
@@ -182,7 +250,7 @@ async function forwardToLocalApp(message: TunnelRequestMessage): Promise<TunnelR
         });
         const durationMs = Math.round(performance.now() - startedAt);
 
-        console.log(`${message.method} ${message.path} ${localResponse.status} ${durationMs}ms`);
+        logRequest(message.method, message.path, localResponse.status, durationMs);
 
         return {
             type: "http_response",
@@ -194,7 +262,7 @@ async function forwardToLocalApp(message: TunnelRequestMessage): Promise<TunnelR
     } catch (error) {
         const durationMs = Math.round(performance.now() - startedAt);
 
-        console.log(`${message.method} ${message.path} 502 ${durationMs}ms`);
+        logRequest(message.method, message.path, 502, durationMs);
 
         return {
             type: "http_response",
@@ -235,11 +303,6 @@ async function connect() {
     const socket = new WebSocket(tunnelServerUrl);
     activeSocket = socket;
 
-    socket.addEventListener("open", () => {
-        console.log(`Connected to Portlex server at ${tunnelServerBaseUrl}`);
-        console.log(`Forwarding requests to ${localTargetUrl}`);
-    });
-
     socket.addEventListener("message", async (event) => {
         const message = parseServerMessage(event.data);
 
@@ -248,7 +311,7 @@ async function connect() {
         }
 
         if (message.type === "connected") {
-            console.log(message.message);
+            printStartup(message.publicUrl);
             return;
         }
 
@@ -272,7 +335,7 @@ async function connect() {
             return;
         }
 
-        console.log(`Disconnected from Portlex server. Reconnecting in ${reconnectDelayMs}ms...`);
+        console.log(`Status:  disconnected. Reconnecting in ${reconnectDelayMs}ms...`);
         setTimeout(connect, reconnectDelayMs);
     });
 

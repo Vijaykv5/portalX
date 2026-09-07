@@ -25,6 +25,8 @@ const pendingRequests = new Map<string, PendingRequest>();
 const authToken = process.env.PORTLEX_AUTH_TOKEN ?? process.env.TUNNEL_AUTH_TOKEN ?? DEFAULT_AUTH_TOKEN;
 const requestedPort = Number(process.env.PORT ?? String(DEFAULT_SERVER_PORT));
 const port = isValidPort(requestedPort) ? requestedPort : DEFAULT_SERVER_PORT;
+const requestedTimeoutMs = Number(process.env.PORTLEX_REQUEST_TIMEOUT_MS ?? String(REQUEST_TIMEOUT_MS));
+const requestTimeoutMs = Number.isInteger(requestedTimeoutMs) && requestedTimeoutMs > 0 ? requestedTimeoutMs : REQUEST_TIMEOUT_MS;
 let activeTunnel: TunnelRecord | null = null;
 let isShuttingDown = false;
 
@@ -42,7 +44,7 @@ function waitForTunnelResponse(requestId: string) {
                     status: 504,
                 })
             );
-        }, REQUEST_TIMEOUT_MS);
+        }, requestTimeoutMs);
 
         pendingRequests.set(requestId, {
             resolve,
