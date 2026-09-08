@@ -1,17 +1,16 @@
 [Unit]
-Description=Portlex Tunnel Server
+Description=Portalx Tunnel Server
 After=network.target
 
 [Service]
 Type=simple
-WorkingDirectory=/opt/portlex
+WorkingDirectory=/opt/portalx
 ExecStart=/root/.bun/bin/bun run server
 Restart=always
 RestartSec=3
 
 Environment=NODE_ENV=production
-Environment=PORT=8080
-Environment=PORTLEX_AUTH_TOKEN=change-me
+EnvironmentFile=-/etc/portalx/portalx.env
 
 [Install]
 WantedBy=multi-user.target

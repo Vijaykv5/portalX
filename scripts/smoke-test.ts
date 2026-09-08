@@ -3,10 +3,27 @@ const localAppPort = 30_000 + Math.floor(Math.random() * 10_000);
 const tunnelServerUrl = `http://localhost:${tunnelServerPort}`;
 const tunnelServerWsUrl = `ws://localhost:${tunnelServerPort}`;
 const localAppUrl = `http://localhost:${localAppPort}`;
-const configPath = `/tmp/portlex-smoke-${Date.now()}.json`;
+const configPath = `/tmp/portalx-smoke-${Date.now()}.json`;
 const processes: Subprocess[] = [];
 
 type Subprocess = ReturnType<typeof Bun.spawn>;
+
+type StatusResponse = {
+    status: "ok";
+    activeConnection: {
+        connectedAt: string;
+        requestCount: number;
+        lastRequestAt: string | null;
+    } | null;
+    pendingRequests: number;
+};
+
+type LocalAppResponse = {
+    method: string;
+    path: string;
+    search: string;
+    body: string;
+};
 
 function wait(ms: number) {
     return new Promise((resolve) => setTimeout(resolve, ms));
@@ -75,7 +92,7 @@ async function waitForTunnel() {
     throw new Error("Timed out waiting for tunnel to become ready");
 }
 
-function assert(condition: unknown, message: string) {
+function assert(condition: unknown, message: string): asserts condition {
     if (!condition) {
         throw new Error(message);
     }
@@ -100,7 +117,7 @@ try {
 
     const versionResult = await runCommand(["bun", "run", "cli", "--", "--version"]);
     assert(versionResult.exitCode === 0, "Version command should exit cleanly");
-    assert(versionResult.stdout.trim() === "portlex 0.1.0", "Version command should print the current version");
+    assert(versionResult.stdout.trim() === "portalx 0.1.0", "Version command should print the current version");
 
     await Bun.write(
         configPath,
@@ -113,12 +130,12 @@ try {
 
     spawnProcess(["bun", "run", "server"], {
         PORT: String(tunnelServerPort),
-        PORTLEX_REQUEST_TIMEOUT_MS: "100",
+        PORTALX_REQUEST_TIMEOUT_MS: "100",
     });
     await waitForHttp(`${tunnelServerUrl}/_status`);
 
     const emptyStatusResponse = await fetch(`${tunnelServerUrl}/_status`);
-    const emptyStatus = await emptyStatusResponse.json();
+    const emptyStatus = await emptyStatusResponse.json() as StatusResponse;
 
     assert(emptyStatusResponse.status === 200, "Status endpoint should return 200");
     assert(emptyStatus.status === "ok", "Status endpoint should report ok");
@@ -131,12 +148,12 @@ try {
     assert(availableConnectionCheckResponse.status === 200, "Connect check should allow an open slot");
 
     spawnProcess(["bun", "run", "cli", "--", "http"], {
-        PORTLEX_CONFIG: configPath,
+        PORTALX_CONFIG: configPath,
     });
     await waitForTunnel();
 
     const activeStatusResponse = await fetch(`${tunnelServerUrl}/_status`);
-    const activeStatus = await activeStatusResponse.json();
+    const activeStatus = await activeStatusResponse.json() as StatusResponse;
 
     assert(activeStatusResponse.status === 200, "Status endpoint should return 200 with an active tunnel");
     assert(activeStatus.activeConnection !== null, "Status endpoint should report one active connection");
@@ -149,7 +166,7 @@ try {
     assert(duplicateConnectionResponse.status === 409, "Second tunnel connection should be rejected");
 
     const getResponse = await fetch(`${tunnelServerUrl}/hello?x=1`);
-    const getBody = await getResponse.json();
+    const getBody = await getResponse.json() as LocalAppResponse;
 
     assert(getResponse.status === 200, "GET request should return 200");
     assert(getBody.method === "GET", "GET method should be forwarded");
@@ -157,8 +174,9 @@ try {
     assert(getBody.search === "?x=1", "GET search params should be forwarded");
 
     const afterGetStatusResponse = await fetch(`${tunnelServerUrl}/_status`);
-    const afterGetStatus = await afterGetStatusResponse.json();
+    const afterGetStatus = await afterGetStatusResponse.json() as StatusResponse;
 
+    assert(afterGetStatus.activeConnection !== null, "Status endpoint should still report an active connection");
     assert(afterGetStatus.activeConnection.requestCount === 2, "Status endpoint should count forwarded requests");
     assert(typeof afterGetStatus.activeConnection.connectedAt === "string", "Status endpoint should include connectedAt");
     assert(typeof afterGetStatus.activeConnection.lastRequestAt === "string", "Status endpoint should include lastRequestAt");
@@ -167,7 +185,7 @@ try {
         method: "POST",
         body: "hello-body",
     });
-    const postBody = await postResponse.json();
+    const postBody = await postResponse.json() as LocalAppResponse;
 
     assert(postResponse.status === 200, "POST request should return 200");
     assert(postBody.method === "POST", "POST method should be forwarded");

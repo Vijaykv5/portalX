@@ -15,17 +15,17 @@ type PendingRequest = {
 };
 
 type TunnelRecord = {
-    socket: ServerWebSocket<unknown>;
+    socket: Bun.ServerWebSocket<unknown>;
     connectedAt: string;
     requestCount: number;
     lastRequestAt: string | null;
 };
 
 const pendingRequests = new Map<string, PendingRequest>();
-const authToken = process.env.PORTLEX_AUTH_TOKEN ?? process.env.TUNNEL_AUTH_TOKEN ?? DEFAULT_AUTH_TOKEN;
+const authToken = process.env.PORTALX_AUTH_TOKEN ?? process.env.PORTLEX_AUTH_TOKEN ?? process.env.TUNNEL_AUTH_TOKEN ?? DEFAULT_AUTH_TOKEN;
 const requestedPort = Number(process.env.PORT ?? String(DEFAULT_SERVER_PORT));
 const port = isValidPort(requestedPort) ? requestedPort : DEFAULT_SERVER_PORT;
-const requestedTimeoutMs = Number(process.env.PORTLEX_REQUEST_TIMEOUT_MS ?? String(REQUEST_TIMEOUT_MS));
+const requestedTimeoutMs = Number(process.env.PORTALX_REQUEST_TIMEOUT_MS ?? process.env.PORTLEX_REQUEST_TIMEOUT_MS ?? String(REQUEST_TIMEOUT_MS));
 const requestTimeoutMs = Number.isInteger(requestedTimeoutMs) && requestedTimeoutMs > 0 ? requestedTimeoutMs : REQUEST_TIMEOUT_MS;
 let activeTunnel: TunnelRecord | null = null;
 let isShuttingDown = false;
@@ -112,14 +112,14 @@ function shutdown() {
     }
 
     isShuttingDown = true;
-    console.log("Shutting down Portlex server...");
+    console.log("Shutting down Portalx server...");
 
     activeTunnel?.socket.close();
     activeTunnel = null;
-    failPendingRequests("Portlex server shutting down", 503);
+    failPendingRequests("Portalx server shutting down", 503);
 
     server.stop();
-    console.log("Portlex server stopped");
+    console.log("Portalx server stopped");
     process.exit(0);
 }
 
@@ -243,7 +243,7 @@ const server = Bun.serve({
     },
 });
 
-console.log(`Portlex server running on http://localhost:${server.port}`);
+console.log(`Portalx server running on http://localhost:${server.port}`);
 
 process.on("SIGINT", shutdown);
 process.on("SIGTERM", shutdown);

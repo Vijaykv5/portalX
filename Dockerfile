@@ -10,4 +10,4 @@ COPY . .
 
 EXPOSE 8080
 
-CMD ["bun","run","server"]
+CMD ["bun", "run", "server"]

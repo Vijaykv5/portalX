@@ -1,4 +1,4 @@
-# Portlex
+# Portalx
 
 A lightweight ngrok-style HTTP tunneling prototype built with Bun.
 
@@ -32,13 +32,13 @@ bun --eval 'Bun.serve({ port: 3000, fetch: req => new Response("Hello from local
 Start the tunnel CLI:
 
 ```bash
-PORTLEX_SERVER_URL=ws://localhost:8081 bun run portlex -- http 3000
+PORTALX_SERVER_URL=ws://localhost:8081 bun run portalx -- http 3000
 ```
 
 When installed as a package binary, the command shape becomes:
 
 ```bash
-portlex http 3000
+portalx http 3000
 ```
 
 Open:
@@ -70,53 +70,53 @@ http://localhost:3000/api/users
 Server:
 
 ```bash
-PORT=8081 PORTLEX_AUTH_TOKEN=secret123 bun run server
+PORT=8081 PORTALX_AUTH_TOKEN=secret123 bun run server
 ```
 
 CLI:
 
 ```bash
-PORTLEX_SERVER_URL=ws://localhost:8081 PORTLEX_AUTH_TOKEN=secret123 bun run portlex -- http 3000
+PORTALX_SERVER_URL=ws://localhost:8081 PORTALX_AUTH_TOKEN=secret123 bun run portalx -- http 3000
 ```
 
 Arguments:
 
 ```txt
-bun run portlex -- http <local-port>
+bun run portalx -- http <local-port>
 ```
 
 CLI options:
 
 ```bash
-bun run portlex -- --help
-bun run portlex -- --version
-bun run portlex -- http 3000
-bun run portlex -- http --port 5173 --server ws://localhost:8081
+bun run portalx -- --help
+bun run portalx -- --version
+bun run portalx -- http 3000
+bun run portalx -- http --port 5173 --server ws://localhost:8081
 ```
 
 When installed as a package binary, the command shape becomes:
 
 ```bash
-portlex http 3000
-portlex http --port 5173 --server ws://localhost:8081
+portalx http 3000
+portalx http --port 5173 --server ws://localhost:8081
 ```
 
 Examples:
 
 ```bash
-bun run portlex -- http 3000
-bun run portlex -- http 5173
-bun run portlex -- http 8000
+bun run portalx -- http 3000
+bun run portalx -- http 5173
+bun run portalx -- http 8000
 ```
 
-Only one CLI connection can be active at a time. If another terminal tries to run `portlex http 3001` while `portlex http 3000` is already connected, the server rejects the second connection.
+Only one CLI connection can be active at a time. If another terminal tries to run `portalx http 3001` while `portalx http 3000` is already connected, the server rejects the second connection.
 
 ## Config File
 
-Portlex reads optional defaults from:
+Portalx reads optional defaults from:
 
 ```txt
-~/.portlex/config.json
+~/.portalx/config.json
 ```
 
 Example:
@@ -132,7 +132,7 @@ Example:
 You can point to a different config file with:
 
 ```bash
-PORTLEX_CONFIG=/path/to/config.json portlex http
+PORTALX_CONFIG=/path/to/config.json portalx http
 ```
 
 Precedence is:
@@ -143,7 +143,7 @@ defaults -> config file -> environment variables -> CLI flags
 
 ## Status
 
-Check active tunnels:
+Check the active connection:
 
 ```txt
 http://localhost:8081/_status
@@ -159,7 +159,7 @@ Example response:
     "requestCount": 3,
     "lastRequestAt": "2026-09-07T13:58:10.000Z"
   },
-  "pendingRequests": 0,
+  "pendingRequests": 0
 }
 ```
 

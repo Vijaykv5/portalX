@@ -32,40 +32,40 @@ type FileConfig = {
 };
 
 function printHelp() {
-    console.log(`Portlex ${VERSION}
+    console.log(`Portalx ${VERSION}
 
 Usage:
-  portlex http <port>
-  portlex http --port <port>
+  portalx http <port>
+  portalx http --port <port>
 
 Options:
   -p, --port <port>      Local port to forward to
-  -s, --server <url>     Portlex server URL
-      --token <token>    Auth token for the Portlex server
+  -s, --server <url>     Portalx server URL
+      --token <token>    Auth token for the Portalx server
   -v, --version          Show version
   -h, --help             Show help
 
 Config:
-  ~/.portlex/config.json
-  PORTLEX_CONFIG         Override config file path
+  ~/.portalx/config.json
+  PORTALX_CONFIG         Override config file path
 
 Environment:
-  PORTLEX_SERVER_URL     Defaults to ws://localhost:8080
-  PORTLEX_AUTH_TOKEN     Defaults to dev-token
-  PORTLEX_LOCAL_PORT     Defaults to 3000
+  PORTALX_SERVER_URL     Defaults to ws://localhost:8080
+  PORTALX_AUTH_TOKEN     Defaults to dev-token
+  PORTALX_LOCAL_PORT     Defaults to 3000
 
 Examples:
-  portlex http 3000
-  portlex http --port 5173 --server ws://localhost:8081
+  portalx http 3000
+  portalx http --port 5173 --server ws://localhost:8081
 `);
 }
 
 function printVersion() {
-    console.log(`portlex ${VERSION}`);
+    console.log(`portalx ${VERSION}`);
 }
 
 function getConfigPath() {
-    return process.env.PORTLEX_CONFIG ?? join(homedir(), ".portlex", "config.json");
+    return process.env.PORTALX_CONFIG ?? process.env.PORTLEX_CONFIG ?? join(homedir(), ".portalx", "config.json");
 }
 
 function readFileConfig(): FileConfig {
@@ -78,7 +78,7 @@ function readFileConfig(): FileConfig {
     try {
         return JSON.parse(readFileSync(configPath, "utf8")) as FileConfig;
     } catch {
-        console.error(`Could not read Portlex config at ${configPath}`);
+        console.error(`Could not read Portalx config at ${configPath}`);
         process.exit(1);
     }
 }
@@ -98,9 +98,9 @@ function parseCliArgs(args: string[]): CliConfig {
     const fileConfig = readFileConfig();
     const positionalArgs: string[] = [];
     let command = args[0];
-    let localPort = process.env.PORTLEX_LOCAL_PORT ?? String(fileConfig.localPort ?? DEFAULT_CLI_TARGET_PORT);
-    let tunnelServerBaseUrl = process.env.PORTLEX_SERVER_URL ?? process.env.TUNNEL_SERVER_URL ?? fileConfig.serverUrl ?? "ws://localhost:8080";
-    let authToken = process.env.PORTLEX_AUTH_TOKEN ?? process.env.TUNNEL_AUTH_TOKEN ?? fileConfig.authToken ?? DEFAULT_AUTH_TOKEN;
+    let localPort = process.env.PORTALX_LOCAL_PORT ?? process.env.PORTLEX_LOCAL_PORT ?? String(fileConfig.localPort ?? DEFAULT_CLI_TARGET_PORT);
+    let tunnelServerBaseUrl = process.env.PORTALX_SERVER_URL ?? process.env.PORTLEX_SERVER_URL ?? process.env.TUNNEL_SERVER_URL ?? fileConfig.serverUrl ?? "ws://localhost:8080";
+    let authToken = process.env.PORTALX_AUTH_TOKEN ?? process.env.PORTLEX_AUTH_TOKEN ?? process.env.TUNNEL_AUTH_TOKEN ?? fileConfig.authToken ?? DEFAULT_AUTH_TOKEN;
 
     if (command === "--version" || command === "-v") {
         printVersion();
@@ -114,12 +114,16 @@ function parseCliArgs(args: string[]): CliConfig {
 
     if (command !== "http") {
         console.error(`Unknown command: ${command}`);
-        console.error("Run portlex --help for usage.");
+        console.error("Run portalx --help for usage.");
         process.exit(1);
     }
 
     for (let index = 1; index < args.length; index++) {
         const arg = args[index];
+
+        if (!arg) {
+            continue;
+        }
 
         if (arg === "--help" || arg === "-h") {
             printHelp();
@@ -151,7 +155,7 @@ function parseCliArgs(args: string[]): CliConfig {
 
         if (arg.startsWith("-")) {
             console.error(`Unknown option: ${arg}`);
-            console.error("Run portlex --help for usage.");
+            console.error("Run portalx --help for usage.");
             process.exit(1);
         }
 
@@ -177,7 +181,7 @@ let isShuttingDown = false;
 
 function printStartup(publicUrl?: string) {
     console.log("");
-    console.log(`Portlex ${VERSION}`);
+    console.log(`Portalx ${VERSION}`);
     console.log(`Local:   ${localTargetUrl}`);
     console.log(`Server:  ${tunnelServerBaseUrl}`);
 
@@ -235,7 +239,7 @@ if (!isValidPort(localPort)) {
 try {
     new URL(tunnelServerBaseUrl);
 } catch {
-    console.error("Portlex server URL must be a valid URL, like ws://localhost:8080");
+    console.error("Portalx server URL must be a valid URL, like ws://localhost:8080");
     process.exit(1);
 }
 
@@ -287,7 +291,7 @@ async function runConnectCheck() {
         console.error(await response.text());
         return false;
     } catch {
-        console.error(`Could not reach Portlex server at ${tunnelServerBaseUrl}`);
+        console.error(`Could not reach Portalx server at ${tunnelServerBaseUrl}`);
         return false;
     }
 }
@@ -340,7 +344,7 @@ async function connect() {
     });
 
     socket.addEventListener("error", () => {
-        console.log("Could not connect to Portlex server");
+        console.log("Could not connect to Portalx server");
     });
 }
 
