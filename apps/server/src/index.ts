@@ -15,10 +15,14 @@ type PendingRequest = {
 };
 
 type TunnelRecord = {
-    socket: Bun.ServerWebSocket<unknown>;
+    socket: Bun.ServerWebSocket<TunnelClientData>;
     connectedAt: string;
     requestCount: number;
     lastRequestAt: string | null;
+};
+
+type TunnelClientData = {
+    publicUrl: string;
 };
 
 const pendingRequests = new Map<string, PendingRequest>();
@@ -106,6 +110,22 @@ function checkTunnelConnection(token: string | null) {
     });
 }
 
+function getPublicUrl(req: Request) {
+    const headers = req.headers;
+    const forwardedProto = headers.get("x-forwarded-proto");
+    const host = headers.get("x-forwarded-host") ?? headers.get("host");
+
+    if (forwardedProto && host) {
+        return `${forwardedProto}://${host}`;
+    }
+
+    if (host) {
+        return `http://${host}`;
+    }
+
+    return `http://localhost:${port}`;
+}
+
 function shutdown() {
     if (isShuttingDown) {
         return;
@@ -123,7 +143,7 @@ function shutdown() {
     process.exit(0);
 }
 
-const server = Bun.serve({
+const server = Bun.serve<TunnelClientData>({
     port,
 
     async fetch(req, server) {
@@ -145,7 +165,11 @@ const server = Bun.serve({
                 return checkResponse;
             }
 
-            const upgraded = server.upgrade(req);
+            const upgraded = server.upgrade(req, {
+                data: {
+                    publicUrl: getPublicUrl(req),
+                },
+            });
 
             if (upgraded) {
                 return;
@@ -202,8 +226,8 @@ const server = Bun.serve({
             ws.send(
                 JSON.stringify({
                     type: "connected",
-                    message: `Tunnel ready at http://localhost:${server.port}`,
-                    publicUrl: `http://localhost:${server.port}`,
+                    message: `Tunnel ready at ${ws.data.publicUrl}`,
+                    publicUrl: ws.data.publicUrl,
                 })
             );
         },
