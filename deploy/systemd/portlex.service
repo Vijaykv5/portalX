@@ -1,0 +1,17 @@
+[Unit]
+Description=Portlex Tunnel Server
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/portlex
+ExecStart=/root/.bun/bin/bun run server
+Restart=always
+RestartSec=3
+
+Environment=NODE_ENV=production
+Environment=PORT=8080
+Environment=PORTLEX_AUTH_TOKEN=change-me
+
+[Install]
+WantedBy=multi-user.target
