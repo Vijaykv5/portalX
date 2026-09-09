@@ -1,6 +1,6 @@
 {
   "name": "portalx",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "A lightweight ngrok-style HTTP tunnel for forwarding localhost apps to public URLs.",
   "module": "index.ts",
   "type": "module",
