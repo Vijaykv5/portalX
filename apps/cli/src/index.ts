@@ -187,6 +187,7 @@ function printStartup(publicUrl?: string) {
 
     if (publicUrl) {
         console.log(`Public:  ${publicUrl}`);
+        console.log(`Forward: ${publicUrl} -> ${localTargetUrl}`);
     }
 
     console.log("Status:  connected");

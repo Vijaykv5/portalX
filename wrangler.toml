@@ -1,0 +1,25 @@
+name = "portalx-relay"
+main = "apps/worker/src/index.ts"
+compatibility_date = "2026-09-09"
+compatibility_flags = ["nodejs_compat"]
+workers_dev = false
+preview_urls = false
+
+[vars]
+PORTALX_BASE_DOMAIN = "vijaykv.xyz"
+
+[[durable_objects.bindings]]
+name = "PORTALX_RELAY"
+class_name = "PortalxRelay"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["PortalxRelay"]
+
+[[routes]]
+pattern = "relay.vijaykv.xyz/*"
+zone_name = "vijaykv.xyz"
+
+[[routes]]
+pattern = "*.vijaykv.xyz/*"
+zone_name = "vijaykv.xyz"

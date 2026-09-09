@@ -10,11 +10,14 @@ type Subprocess = ReturnType<typeof Bun.spawn>;
 
 type StatusResponse = {
     status: "ok";
-    activeConnection: {
+    activeConnections: number;
+    tunnels: Array<{
+        slug: string;
+        publicUrl: string;
         connectedAt: string;
         requestCount: number;
         lastRequestAt: string | null;
-    } | null;
+    }>;
     pendingRequests: number;
 };
 
@@ -139,7 +142,8 @@ try {
 
     assert(emptyStatusResponse.status === 200, "Status endpoint should return 200");
     assert(emptyStatus.status === "ok", "Status endpoint should report ok");
-    assert(emptyStatus.activeConnection === null, "Status endpoint should start with no active connection");
+    assert(emptyStatus.activeConnections === 0, "Status endpoint should start with no active connections");
+    assert(emptyStatus.tunnels.length === 0, "Status endpoint should start with no tunnel records");
 
     const invalidTokenCheckResponse = await fetch(`${tunnelServerUrl}/_connect-check?token=wrong`);
     assert(invalidTokenCheckResponse.status === 401, "Connect check should reject invalid tokens");
@@ -156,8 +160,13 @@ try {
     const activeStatus = await activeStatusResponse.json() as StatusResponse;
 
     assert(activeStatusResponse.status === 200, "Status endpoint should return 200 with an active tunnel");
-    assert(activeStatus.activeConnection !== null, "Status endpoint should report one active connection");
-    assert(activeStatus.activeConnection.requestCount === 1, "Status endpoint should include the health request");
+    assert(activeStatus.activeConnections === 1, "Status endpoint should report one active connection");
+    assert(activeStatus.tunnels.length === 1, "Status endpoint should include one tunnel record");
+    const activeTunnel = activeStatus.tunnels[0];
+
+    assert(activeTunnel, "Status endpoint should include an active tunnel");
+    assert(activeTunnel.requestCount === 1, "Status endpoint should include the health request");
+    assert(activeTunnel.slug.length > 0, "Status endpoint should include a tunnel slug");
 
     const occupiedConnectionCheckResponse = await fetch(`${tunnelServerUrl}/_connect-check?token=dev-token`);
     assert(occupiedConnectionCheckResponse.status === 409, "Connect check should reject a second connection");
@@ -176,10 +185,13 @@ try {
     const afterGetStatusResponse = await fetch(`${tunnelServerUrl}/_status`);
     const afterGetStatus = await afterGetStatusResponse.json() as StatusResponse;
 
-    assert(afterGetStatus.activeConnection !== null, "Status endpoint should still report an active connection");
-    assert(afterGetStatus.activeConnection.requestCount === 2, "Status endpoint should count forwarded requests");
-    assert(typeof afterGetStatus.activeConnection.connectedAt === "string", "Status endpoint should include connectedAt");
-    assert(typeof afterGetStatus.activeConnection.lastRequestAt === "string", "Status endpoint should include lastRequestAt");
+    assert(afterGetStatus.tunnels.length === 1, "Status endpoint should still report one tunnel");
+    const afterGetTunnel = afterGetStatus.tunnels[0];
+
+    assert(afterGetTunnel, "Status endpoint should include a tunnel after the GET request");
+    assert(afterGetTunnel.requestCount === 2, "Status endpoint should count forwarded requests");
+    assert(typeof afterGetTunnel.connectedAt === "string", "Status endpoint should include connectedAt");
+    assert(typeof afterGetTunnel.lastRequestAt === "string", "Status endpoint should include lastRequestAt");
 
     const postResponse = await fetch(`${tunnelServerUrl}/submit`, {
         method: "POST",
@@ -200,6 +212,71 @@ try {
 
     const timeoutResponse = await fetch(`${tunnelServerUrl}/slow`);
     assert(timeoutResponse.status === 504, "Slow local responses should return 504");
+
+    await cleanup();
+    processes.length = 0;
+
+    const subdomainServerPort = tunnelServerPort + 1;
+    const subdomainLocalAppPort = localAppPort + 1;
+    const baseDomain = "portalx.test";
+    const subdomainServerUrl = `http://localhost:${subdomainServerPort}`;
+    const subdomainLocalAppUrl = `http://localhost:${subdomainLocalAppPort}`;
+
+    spawnProcess(
+        [
+            "bun",
+            "--eval",
+            `Bun.serve({ port: ${subdomainLocalAppPort}, async fetch(req) { const url = new URL(req.url); return Response.json({ path: url.pathname, host: req.headers.get("host") }); } }); console.log("subdomain local app ready");`,
+        ],
+    );
+    await waitForHttp(`${subdomainLocalAppUrl}/health`);
+
+    spawnProcess(["bun", "run", "server"], {
+        PORT: String(subdomainServerPort),
+        PORTALX_BASE_DOMAIN: baseDomain,
+    });
+    await waitForHttp(`${subdomainServerUrl}/_status`);
+
+    spawnProcess(["bun", "run", "cli", "--", "http", String(subdomainLocalAppPort)], {
+        PORTALX_SERVER_URL: `ws://localhost:${subdomainServerPort}`,
+    });
+
+    for (let attempt = 0; attempt < 50; attempt++) {
+        const statusResponse = await fetch(`${subdomainServerUrl}/_status`);
+        const status = await statusResponse.json() as StatusResponse;
+
+        if (status.tunnels.length === 1) {
+            break;
+        }
+
+        await wait(100);
+    }
+
+    const subdomainStatusResponse = await fetch(`${subdomainServerUrl}/_status`);
+    const subdomainStatus = await subdomainStatusResponse.json() as StatusResponse;
+    const subdomainTunnel = subdomainStatus.tunnels[0];
+
+    assert(subdomainTunnel, "Subdomain mode should include a tunnel record");
+    assert(subdomainTunnel.slug, "Subdomain mode should create a tunnel slug");
+    assert(subdomainTunnel.publicUrl === `http://${subdomainTunnel.slug}.${baseDomain}`, "Subdomain mode should expose a slug public URL");
+
+    const subdomainResponse = await fetch(`${subdomainServerUrl}/subdomain-path`, {
+        headers: {
+            host: `${subdomainTunnel.slug}.${baseDomain}`,
+        },
+    });
+    const subdomainBody = await subdomainResponse.json() as { path: string };
+
+    assert(subdomainResponse.status === 200, "Subdomain request should return 200");
+    assert(subdomainBody.path === "/subdomain-path", "Subdomain request path should be forwarded");
+
+    const landingHostResponse = await fetch(`${subdomainServerUrl}/`, {
+        headers: {
+            host: baseDomain,
+        },
+    });
+
+    assert(landingHostResponse.status === 503, "Base domain should not be treated as a tunnel");
 
     console.log("Smoke test passed");
 } finally {

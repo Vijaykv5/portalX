@@ -3,6 +3,7 @@ export const DEFAULT_CLI_TARGET_PORT = 3000;
 export const DEFAULT_SERVER_PORT = 8080;
 export const MAX_BODY_BYTES = 1024 * 1024;
 export const REQUEST_TIMEOUT_MS = 10_000;
+export const TUNNEL_SLUG_LENGTH = 12;
 
 const blockedHeaders = new Set([
     "connection",
@@ -38,6 +39,7 @@ export type ConnectedMessage = {
     type: "connected";
     message: string;
     publicUrl: string;
+    tunnelSlug: string;
 };
 
 export type ServerMessage = TunnelRequestMessage | ConnectedMessage;

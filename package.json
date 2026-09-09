@@ -11,11 +11,14 @@
     "server": "bun run apps/server/src/index.ts",
     "cli": "bun run apps/cli/src/index.ts",
     "portalx": "bun run apps/cli/src/index.ts",
+    "worker:dev": "bunx wrangler dev",
+    "worker:deploy": "bunx wrangler deploy",
     "typecheck": "tsc --noEmit",
     "test:smoke": "bun run scripts/smoke-test.ts"
   },
   "devDependencies": {
-    "@types/bun": "latest"
+    "@types/bun": "latest",
+    "wrangler": "^4.130.0"
   },
   "peerDependencies": {
     "typescript": "^5"
