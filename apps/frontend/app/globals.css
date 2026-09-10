@@ -1,0 +1,24 @@
+@import "tailwindcss";
+
+:root {
+  --background: #05060a;
+  --foreground: #f6f7fb;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-ubuntu);
+  --font-mono: var(--font-geist-mono);
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-ubuntu), Arial, Helvetica, sans-serif;
+}
+
+::selection {
+  background: rgba(103, 232, 249, 0.28);
+  color: var(--foreground);
+}
