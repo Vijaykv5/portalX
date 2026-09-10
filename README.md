@@ -41,6 +41,12 @@ When installed as a package binary, the command shape becomes:
 portalx http 3000
 ```
 
+By default, the published CLI connects to:
+
+```txt
+wss://relay.vijaykv.xyz
+```
+
 Open:
 
 ```txt
@@ -79,6 +85,13 @@ CLI:
 PORTALX_SERVER_URL=ws://localhost:8081 PORTALX_AUTH_TOKEN=secret123 bun run portalx -- http 3000
 ```
 
+For the published CLI, save the token once:
+
+```bash
+portalx config set authToken secret123
+portalx http 3000
+```
+
 Arguments:
 
 ```txt
@@ -92,6 +105,10 @@ bun run portalx -- --help
 bun run portalx -- --version
 bun run portalx -- http 3000
 bun run portalx -- http --port 5173 --server ws://localhost:8081
+portalx config set serverUrl wss://relay.vijaykv.xyz
+portalx config set authToken secret123
+portalx config get
+portalx config path
 ```
 
 When installed as a package binary, the command shape becomes:
@@ -124,9 +141,17 @@ Example:
 ```json
 {
   "localPort": 3000,
-  "serverUrl": "ws://localhost:8081",
-  "authToken": "dev-token"
+  "serverUrl": "wss://relay.vijaykv.xyz",
+  "authToken": "secret123"
 }
+```
+
+Create that file through the CLI:
+
+```bash
+portalx config set serverUrl wss://relay.vijaykv.xyz
+portalx config set authToken secret123
+portalx config set localPort 3000
 ```
 
 You can point to a different config file with:

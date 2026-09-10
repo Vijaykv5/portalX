@@ -1,8 +1,8 @@
 #!/usr/bin/env bun
 
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import {
     DEFAULT_AUTH_TOKEN,
     DEFAULT_CLI_TARGET_PORT,
@@ -16,7 +16,8 @@ import {
     type TunnelResponseMessage,
 } from "../../../packages/protocol/src/index";
 
-const VERSION = "0.1.0";
+const VERSION = "0.1.3";
+const DEFAULT_TUNNEL_SERVER_URL = "wss://relay.vijaykv.xyz";
 
 type CliConfig = {
     command: "http";
@@ -31,12 +32,19 @@ type FileConfig = {
     authToken?: string;
 };
 
+type ConfigKey = keyof FileConfig;
+
+const configKeys = new Set(["localPort", "serverUrl", "authToken"]);
+
 function printHelp() {
     console.log(`Portalx ${VERSION}
 
 Usage:
   portalx http <port>
   portalx http --port <port>
+  portalx config set <key> <value>
+  portalx config get
+  portalx config path
 
 Options:
   -p, --port <port>      Local port to forward to
@@ -48,15 +56,17 @@ Options:
 Config:
   ~/.portalx/config.json
   PORTALX_CONFIG         Override config file path
+  keys: serverUrl, authToken, localPort
 
 Environment:
-  PORTALX_SERVER_URL     Defaults to ws://localhost:8080
+  PORTALX_SERVER_URL     Defaults to ${DEFAULT_TUNNEL_SERVER_URL}
   PORTALX_AUTH_TOKEN     Defaults to dev-token
   PORTALX_LOCAL_PORT     Defaults to 3000
 
 Examples:
   portalx http 3000
-  portalx http --port 5173 --server ws://localhost:8081
+  portalx config set authToken secret123
+  portalx config set serverUrl wss://relay.vijaykv.xyz
 `);
 }
 
@@ -83,6 +93,89 @@ function readFileConfig(): FileConfig {
     }
 }
 
+function writeFileConfig(config: FileConfig) {
+    const configPath = getConfigPath();
+
+    mkdirSync(dirname(configPath), {
+        recursive: true,
+    });
+    writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`);
+}
+
+function maskConfig(config: FileConfig) {
+    return {
+        ...config,
+        authToken: config.authToken ? "********" : undefined,
+    };
+}
+
+function parseConfigKey(value: string | undefined): ConfigKey {
+    if (!value || !configKeys.has(value)) {
+        console.error("Config key must be one of: serverUrl, authToken, localPort");
+        process.exit(1);
+    }
+
+    return value as ConfigKey;
+}
+
+function runConfigCommand(args: string[]) {
+    const subcommand = args[1];
+
+    if (!subcommand || subcommand === "--help" || subcommand === "-h") {
+        console.log(`Portalx config
+
+Usage:
+  portalx config set <key> <value>
+  portalx config get
+  portalx config path
+
+Keys:
+  serverUrl
+  authToken
+  localPort
+`);
+        process.exit(subcommand ? 0 : 1);
+    }
+
+    if (subcommand === "path") {
+        console.log(getConfigPath());
+        process.exit(0);
+    }
+
+    if (subcommand === "get") {
+        console.log(JSON.stringify(maskConfig(readFileConfig()), null, 2));
+        process.exit(0);
+    }
+
+    if (subcommand === "set") {
+        const key = parseConfigKey(args[2]);
+        const value = args[3];
+
+        if (!value) {
+            console.error("Config set requires a value");
+            process.exit(1);
+        }
+
+        if (key === "localPort" && !isValidPort(Number(value))) {
+            console.error("localPort must be a number between 1 and 65535");
+            process.exit(1);
+        }
+
+        const nextConfig = {
+            ...readFileConfig(),
+            [key]: key === "localPort" ? Number(value) : value,
+        };
+
+        writeFileConfig(nextConfig);
+        console.log(`Saved ${key} to ${getConfigPath()}`);
+        process.exit(0);
+    }
+
+    console.error(`Unknown config command: ${subcommand}`);
+    console.error("Run portalx config --help for usage.");
+    process.exit(1);
+}
+
 function readOptionValue(args: string[], index: number, optionName: string) {
     const value = args[index + 1];
 
@@ -99,7 +192,7 @@ function parseCliArgs(args: string[]): CliConfig {
     const positionalArgs: string[] = [];
     let command = args[0];
     let localPort = process.env.PORTALX_LOCAL_PORT ?? process.env.PORTLEX_LOCAL_PORT ?? String(fileConfig.localPort ?? DEFAULT_CLI_TARGET_PORT);
-    let tunnelServerBaseUrl = process.env.PORTALX_SERVER_URL ?? process.env.PORTLEX_SERVER_URL ?? process.env.TUNNEL_SERVER_URL ?? fileConfig.serverUrl ?? "ws://localhost:8080";
+    let tunnelServerBaseUrl = process.env.PORTALX_SERVER_URL ?? process.env.PORTLEX_SERVER_URL ?? process.env.TUNNEL_SERVER_URL ?? fileConfig.serverUrl ?? DEFAULT_TUNNEL_SERVER_URL;
     let authToken = process.env.PORTALX_AUTH_TOKEN ?? process.env.PORTLEX_AUTH_TOKEN ?? process.env.TUNNEL_AUTH_TOKEN ?? fileConfig.authToken ?? DEFAULT_AUTH_TOKEN;
 
     if (command === "--version" || command === "-v") {
@@ -110,6 +203,10 @@ function parseCliArgs(args: string[]): CliConfig {
     if (!command || command === "--help" || command === "-h") {
         printHelp();
         process.exit(command ? 0 : 1);
+    }
+
+    if (command === "config") {
+        runConfigCommand(args);
     }
 
     if (command !== "http") {

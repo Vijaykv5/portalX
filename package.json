@@ -1,6 +1,6 @@
 {
-  "name": "portalx",
-  "version": "0.1.1",
+  "name": "@vijaykv/portalx",
+  "version": "0.1.3",
   "description": "A lightweight ngrok-style HTTP tunnel for forwarding localhost apps to public URLs.",
   "module": "index.ts",
   "type": "module",
@@ -14,7 +14,7 @@
     "cloudflare"
   ],
   "bin": {
-    "portalx": "./dist/portalx.js"
+    "portalx": "dist/portalx.js"
   },
   "files": [
     "dist",
@@ -40,5 +40,8 @@
   },
   "peerDependencies": {
     "typescript": "^5"
+  },
+  "dependencies": {
+    "ngrok": "^5.0.0-beta.2"
   }
 }

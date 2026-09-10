@@ -4,6 +4,7 @@ const tunnelServerUrl = `http://localhost:${tunnelServerPort}`;
 const tunnelServerWsUrl = `ws://localhost:${tunnelServerPort}`;
 const localAppUrl = `http://localhost:${localAppPort}`;
 const configPath = `/tmp/portalx-smoke-${Date.now()}.json`;
+const cliConfigPath = `/tmp/portalx-cli-config-${Date.now()}.json`;
 const processes: Subprocess[] = [];
 
 type Subprocess = ReturnType<typeof Bun.spawn>;
@@ -26,6 +27,12 @@ type LocalAppResponse = {
     path: string;
     search: string;
     body: string;
+};
+
+type FileConfig = {
+    localPort?: number | string;
+    serverUrl?: string;
+    authToken?: string;
 };
 
 function wait(ms: number) {
@@ -120,7 +127,21 @@ try {
 
     const versionResult = await runCommand(["bun", "run", "cli", "--", "--version"]);
     assert(versionResult.exitCode === 0, "Version command should exit cleanly");
-    assert(versionResult.stdout.trim() === "portalx 0.1.0", "Version command should print the current version");
+    assert(versionResult.stdout.trim() === "portalx 0.1.3", "Version command should print the current version");
+
+    const configPathResult = await runCommand(["bun", "run", "cli", "--", "config", "path"], {
+        PORTALX_CONFIG: cliConfigPath,
+    });
+    assert(configPathResult.exitCode === 0, "Config path command should exit cleanly");
+    assert(configPathResult.stdout.trim() === cliConfigPath, "Config path command should print the active config path");
+
+    const configSetResult = await runCommand(["bun", "run", "cli", "--", "config", "set", "serverUrl", tunnelServerWsUrl], {
+        PORTALX_CONFIG: cliConfigPath,
+    });
+    assert(configSetResult.exitCode === 0, "Config set command should exit cleanly");
+
+    const savedConfig = await Bun.file(cliConfigPath).json() as FileConfig;
+    assert(savedConfig.serverUrl === tunnelServerWsUrl, "Config set command should save serverUrl");
 
     await Bun.write(
         configPath,
@@ -281,5 +302,6 @@ try {
     console.log("Smoke test passed");
 } finally {
     await Bun.file(configPath).delete().catch(() => {});
+    await Bun.file(cliConfigPath).delete().catch(() => {});
     await cleanup();
 }
