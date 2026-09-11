@@ -27,6 +27,8 @@ type CliConfig = {
     authToken: string;
 };
 
+type TokenSource = "default" | "config" | "env" | "flag";
+
 type FileConfig = {
     localPort?: number | string;
     serverUrl?: string;
@@ -311,7 +313,9 @@ async function parseCliArgs(args: string[]): Promise<CliConfig> {
     let command = args[0];
     let localPort = process.env.PORTALX_LOCAL_PORT ?? process.env.PORTLEX_LOCAL_PORT ?? String(fileConfig.localPort ?? DEFAULT_CLI_TARGET_PORT);
     let tunnelServerBaseUrl = process.env.PORTALX_SERVER_URL ?? process.env.PORTLEX_SERVER_URL ?? process.env.TUNNEL_SERVER_URL ?? fileConfig.serverUrl ?? DEFAULT_TUNNEL_SERVER_URL;
-    let authToken = process.env.PORTALX_AUTH_TOKEN ?? process.env.PORTLEX_AUTH_TOKEN ?? process.env.TUNNEL_AUTH_TOKEN ?? fileConfig.authToken ?? DEFAULT_AUTH_TOKEN;
+    const envAuthToken = process.env.PORTALX_AUTH_TOKEN ?? process.env.PORTLEX_AUTH_TOKEN ?? process.env.TUNNEL_AUTH_TOKEN;
+    let authToken = envAuthToken ?? fileConfig.authToken ?? DEFAULT_AUTH_TOKEN;
+    let tokenSource: TokenSource = envAuthToken ? "env" : fileConfig.authToken ? "config" : "default";
 
     if (command === "--version" || command === "-v") {
         printVersion();
@@ -368,6 +372,7 @@ async function parseCliArgs(args: string[]): Promise<CliConfig> {
 
         if (arg === "--token") {
             authToken = readOptionValue(args, index, arg);
+            tokenSource = "flag";
             index++;
             continue;
         }
@@ -382,6 +387,7 @@ async function parseCliArgs(args: string[]): Promise<CliConfig> {
     }
 
     localPort = positionalArgs[0] ?? localPort;
+    assertLoggedInForHostedRelay(tunnelServerBaseUrl, tokenSource);
 
     return {
         command,
@@ -389,6 +395,24 @@ async function parseCliArgs(args: string[]): Promise<CliConfig> {
         tunnelServerBaseUrl,
         authToken,
     };
+}
+
+function assertLoggedInForHostedRelay(serverUrl: string, tokenSource: TokenSource) {
+    const serverHostname = new URL(serverUrl).hostname;
+    const defaultServerHostname = new URL(DEFAULT_TUNNEL_SERVER_URL).hostname;
+
+    if (serverHostname !== defaultServerHostname || tokenSource !== "default") {
+        return;
+    }
+
+    console.error("You are not logged in. Use this command to log in with GitHub:");
+    console.error("");
+    console.error("  portalx login");
+    console.error("");
+    console.error("Then run:");
+    console.error("");
+    console.error("  portalx http 3000");
+    process.exit(1);
 }
 
 const config = await parseCliArgs(process.argv.slice(2));

@@ -6,7 +6,9 @@ workers_dev = false
 preview_urls = false
 
 [vars]
-PORTALX_BASE_DOMAIN = "tunnel.vijaykv.xyz"
+PORTALX_BASE_DOMAIN = "vijaykv.xyz"
+PORTALX_FRONTEND_HOST = "portalx.vijaykv.xyz"
+PORTALX_FRONTEND_ORIGIN = "https://portalx-3ri.pages.dev"
 
 [[durable_objects.bindings]]
 name = "PORTALX_RELAY"
@@ -25,5 +27,5 @@ pattern = "api.vijaykv.xyz/*"
 zone_name = "vijaykv.xyz"
 
 [[routes]]
-pattern = "*.tunnel.vijaykv.xyz/*"
+pattern = "*.vijaykv.xyz/*"
 zone_name = "vijaykv.xyz"

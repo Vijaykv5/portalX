@@ -129,6 +129,14 @@ try {
     assert(versionResult.exitCode === 0, "Version command should exit cleanly");
     assert(versionResult.stdout.trim() === "portalx 0.1.4", "Version command should print the current version");
 
+    const missingLoginResult = await runCommand(["bun", "run", "cli", "--", "http", String(localAppPort)], {
+        PORTALX_CONFIG: `/tmp/portalx-missing-login-${Date.now()}.json`,
+    });
+
+    assert(missingLoginResult.exitCode === 1, "Hosted CLI should require login when no token is configured");
+    assert(missingLoginResult.stderr.includes("You are not logged in"), "Hosted CLI should explain that login is required");
+    assert(missingLoginResult.stderr.includes("portalx login"), "Hosted CLI should tell the user how to log in");
+
     const configPathResult = await runCommand(["bun", "run", "cli", "--", "config", "path"], {
         PORTALX_CONFIG: cliConfigPath,
     });
@@ -260,6 +268,7 @@ try {
 
     spawnProcess(["bun", "run", "cli", "--", "http", String(subdomainLocalAppPort)], {
         PORTALX_SERVER_URL: `ws://localhost:${subdomainServerPort}`,
+        PORTALX_AUTH_TOKEN: "dev-token",
     });
 
     for (let attempt = 0; attempt < 50; attempt++) {

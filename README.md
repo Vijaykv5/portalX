@@ -233,7 +233,7 @@ Cloudflare routes:
 portalx.vijaykv.xyz  -> Cloudflare Pages frontend
 api.vijaykv.xyz      -> Portalx Worker auth API
 relay.vijaykv.xyz    -> Portalx Worker relay
-*.tunnel.vijaykv.xyz -> Portalx tunnel URLs
+*.vijaykv.xyz        -> Portalx tunnel URLs
 ```
 
 Worker secrets:
@@ -257,8 +257,10 @@ The CLI opens GitHub login, polls `https://api.vijaykv.xyz/cli/session/<id>`, th
 Tunnel URLs are generated under:
 
 ```txt
-https://<random>.tunnel.vijaykv.xyz
+https://<random>.vijaykv.xyz
 ```
+
+The Worker proxies `portalx.vijaykv.xyz` to the Pages origin before applying wildcard tunnel routing, so the landing page and tunnel URLs can share the same wildcard certificate.
 
 ## Test
 

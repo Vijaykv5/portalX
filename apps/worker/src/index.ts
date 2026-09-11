@@ -12,6 +12,8 @@ type Env = {
     PORTALX_RELAY: DurableObjectNamespace;
     PORTALX_AUTH_TOKEN?: string;
     PORTALX_BASE_DOMAIN?: string;
+    PORTALX_FRONTEND_HOST?: string;
+    PORTALX_FRONTEND_ORIGIN?: string;
     PORTALX_REQUEST_TIMEOUT_MS?: string;
     GITHUB_CLIENT_ID?: string;
     GITHUB_CLIENT_SECRET?: string;
@@ -164,6 +166,10 @@ export class PortalxRelay {
             return this.connectTunnel(req);
         }
 
+        if (this.isFrontendRequest(req)) {
+            return this.proxyFrontendRequest(req);
+        }
+
         return this.forwardRequest(req);
     }
 
@@ -286,6 +292,21 @@ export class PortalxRelay {
         );
 
         return this.waitForTunnelResponse(requestId);
+    }
+
+    private proxyFrontendRequest(req: Request) {
+        const reqUrl = new URL(req.url);
+        const frontendUrl = new URL(reqUrl.pathname + reqUrl.search, this.frontendOrigin);
+        const headers = new Headers(req.headers);
+
+        headers.set("host", frontendUrl.host);
+
+        return fetch(frontendUrl, {
+            method: req.method,
+            headers,
+            body: req.method === "GET" || req.method === "HEAD" ? undefined : req.body,
+            redirect: "manual",
+        });
     }
 
     private waitForTunnelResponse(requestId: string) {
@@ -515,6 +536,15 @@ export class PortalxRelay {
         return this.activeTunnelsBySlug.get(slug) ?? null;
     }
 
+    private isFrontendRequest(req: Request) {
+        return this.getRequestHostname(req) === this.frontendHost;
+    }
+
+    private getRequestHostname(req: Request) {
+        const host = req.headers.get("x-forwarded-host") ?? req.headers.get("host");
+        return host?.split(":")[0] ?? null;
+    }
+
     private getPublicUrl(req: Request, slug: string) {
         const origin = this.getRequestOrigin(req);
 
@@ -716,5 +746,13 @@ export class PortalxRelay {
 
     private get baseDomain() {
         return this.env.PORTALX_BASE_DOMAIN;
+    }
+
+    private get frontendHost() {
+        return this.env.PORTALX_FRONTEND_HOST ?? "portalx.vijaykv.xyz";
+    }
+
+    private get frontendOrigin() {
+        return this.env.PORTALX_FRONTEND_ORIGIN ?? "https://portalx-3ri.pages.dev";
     }
 }
