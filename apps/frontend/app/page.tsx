@@ -43,10 +43,10 @@ export default function Home() {
       </header>
 
       <section className="mx-auto grid min-h-[calc(100vh-84px)] w-full max-w-[1440px] content-center px-5 pb-20 pt-10 text-center sm:px-7 lg:px-9">
-        <div className="mx-auto max-w-4xl">
-          <h1 className="mx-auto text-balance text-5xl font-bold leading-[1.02] tracking-normal text-white sm:text-6xl md:text-7xl lg:text-8xl">
-            <span className="block">Share localhost</span>
-            <span className="block">with anyone</span>
+        <div className="mx-auto max-w-5xl">
+          <h1 className="mx-auto text-[2.15rem] font-bold uppercase leading-[1.03] tracking-normal text-white sm:text-[3.1rem] md:text-[4.8rem] lg:text-[5.9rem]">
+            <span className="block whitespace-nowrap">Share localhost</span>
+            <span className="block whitespace-nowrap">with anyone</span>
           </h1>
           <p className="mx-auto mt-7 max-w-xl text-balance text-base font-medium leading-7 tracking-normal text-white/46 sm:text-lg sm:leading-8">
             Create a public URL for local apps, APIs and demos
