@@ -16,8 +16,9 @@ import {
     type TunnelResponseMessage,
 } from "../../../packages/protocol/src/index";
 
-const VERSION = "0.1.3";
+const VERSION = "0.1.4";
 const DEFAULT_TUNNEL_SERVER_URL = "wss://relay.vijaykv.xyz";
+const DEFAULT_API_URL = "https://api.vijaykv.xyz";
 
 type CliConfig = {
     command: "http";
@@ -29,17 +30,19 @@ type CliConfig = {
 type FileConfig = {
     localPort?: number | string;
     serverUrl?: string;
+    apiUrl?: string;
     authToken?: string;
 };
 
 type ConfigKey = keyof FileConfig;
 
-const configKeys = new Set(["localPort", "serverUrl", "authToken"]);
+const configKeys = new Set(["localPort", "serverUrl", "apiUrl", "authToken"]);
 
 function printHelp() {
     console.log(`Portalx ${VERSION}
 
 Usage:
+  portalx login
   portalx http <port>
   portalx http --port <port>
   portalx config set <key> <value>
@@ -56,14 +59,16 @@ Options:
 Config:
   ~/.portalx/config.json
   PORTALX_CONFIG         Override config file path
-  keys: serverUrl, authToken, localPort
+  keys: serverUrl, apiUrl, authToken, localPort
 
 Environment:
   PORTALX_SERVER_URL     Defaults to ${DEFAULT_TUNNEL_SERVER_URL}
+  PORTALX_API_URL        Defaults to ${DEFAULT_API_URL}
   PORTALX_AUTH_TOKEN     Defaults to dev-token
   PORTALX_LOCAL_PORT     Defaults to 3000
 
 Examples:
+  portalx login
   portalx http 3000
   portalx config set authToken secret123
   portalx config set serverUrl wss://relay.vijaykv.xyz
@@ -131,6 +136,7 @@ Usage:
 
 Keys:
   serverUrl
+  apiUrl
   authToken
   localPort
 `);
@@ -176,6 +182,118 @@ Keys:
     process.exit(1);
 }
 
+type LoginSessionResponse = {
+    status: "pending" | "approved" | "expired";
+    token?: string;
+    user?: {
+        id?: number;
+        username?: string;
+    };
+};
+
+function getApiUrl(fileConfig: FileConfig) {
+    return process.env.PORTALX_API_URL ?? process.env.PORTLEX_API_URL ?? fileConfig.apiUrl ?? DEFAULT_API_URL;
+}
+
+function openBrowser(url: string) {
+    const platform = process.platform;
+    const command = platform === "darwin"
+        ? ["open", url]
+        : platform === "win32"
+            ? ["cmd", "/c", "start", "", url]
+            : ["xdg-open", url];
+
+    Bun.spawn(command, {
+        stdout: "ignore",
+        stderr: "ignore",
+    });
+}
+
+function wait(ms: number) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function runLoginCommand(args: string[], fileConfig: FileConfig) {
+    let apiUrl = getApiUrl(fileConfig);
+
+    for (let index = 1; index < args.length; index++) {
+        const arg = args[index];
+
+        if (arg === "--help" || arg === "-h") {
+            console.log(`Portalx login
+
+Usage:
+  portalx login
+  portalx login --api <url>
+`);
+            process.exit(0);
+        }
+
+        if (arg === "--api") {
+            apiUrl = readOptionValue(args, index, arg);
+            index++;
+            continue;
+        }
+
+        if (arg?.startsWith("-")) {
+            console.error(`Unknown option: ${arg}`);
+            process.exit(1);
+        }
+    }
+
+    const sessionId = crypto.randomUUID();
+    const loginUrl = new URL("/auth/github/start", apiUrl);
+    loginUrl.searchParams.set("session", sessionId);
+
+    console.log("Opening GitHub login...");
+    console.log(loginUrl.toString());
+    openBrowser(loginUrl.toString());
+
+    const sessionUrl = new URL(`/cli/session/${sessionId}`, apiUrl);
+    const deadline = Date.now() + 10 * 60 * 1000;
+
+    while (Date.now() < deadline) {
+        await wait(2_000);
+
+        const response = await fetch(sessionUrl);
+
+        if (response.status === 404) {
+            console.error("Login session expired. Run portalx login again.");
+            process.exit(1);
+        }
+
+        if (!response.ok) {
+            console.error(await response.text());
+            process.exit(1);
+        }
+
+        const session = await response.json() as LoginSessionResponse;
+
+        if (session.status === "pending") {
+            continue;
+        }
+
+        if (session.status !== "approved" || !session.token) {
+            console.error("Login was not approved. Run portalx login again.");
+            process.exit(1);
+        }
+
+        writeFileConfig({
+            ...fileConfig,
+            apiUrl,
+            serverUrl: fileConfig.serverUrl ?? DEFAULT_TUNNEL_SERVER_URL,
+            authToken: session.token,
+        });
+
+        console.log(`Logged in${session.user?.username ? ` as @${session.user.username}` : ""}`);
+        console.log(`Saved Portalx token to ${getConfigPath()}`);
+        process.exit(0);
+    }
+
+    console.error("Timed out waiting for GitHub login. Run portalx login again.");
+    process.exit(1);
+}
+
 function readOptionValue(args: string[], index: number, optionName: string) {
     const value = args[index + 1];
 
@@ -187,7 +305,7 @@ function readOptionValue(args: string[], index: number, optionName: string) {
     return value;
 }
 
-function parseCliArgs(args: string[]): CliConfig {
+async function parseCliArgs(args: string[]): Promise<CliConfig> {
     const fileConfig = readFileConfig();
     const positionalArgs: string[] = [];
     let command = args[0];
@@ -207,6 +325,10 @@ function parseCliArgs(args: string[]): CliConfig {
 
     if (command === "config") {
         runConfigCommand(args);
+    }
+
+    if (command === "login") {
+        await runLoginCommand(args, fileConfig);
     }
 
     if (command !== "http") {
@@ -269,7 +391,7 @@ function parseCliArgs(args: string[]): CliConfig {
     };
 }
 
-const config = parseCliArgs(process.argv.slice(2));
+const config = await parseCliArgs(process.argv.slice(2));
 const { localPort, tunnelServerBaseUrl, authToken } = config;
 const localTargetUrl = `http://localhost:${localPort}`;
 const reconnectDelayMs = 1_000;

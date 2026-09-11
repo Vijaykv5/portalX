@@ -21,5 +21,9 @@ pattern = "relay.vijaykv.xyz/*"
 zone_name = "vijaykv.xyz"
 
 [[routes]]
+pattern = "api.vijaykv.xyz/*"
+zone_name = "vijaykv.xyz"
+
+[[routes]]
 pattern = "*.vijaykv.xyz/*"
 zone_name = "vijaykv.xyz"

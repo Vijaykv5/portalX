@@ -127,7 +127,7 @@ try {
 
     const versionResult = await runCommand(["bun", "run", "cli", "--", "--version"]);
     assert(versionResult.exitCode === 0, "Version command should exit cleanly");
-    assert(versionResult.stdout.trim() === "portalx 0.1.3", "Version command should print the current version");
+    assert(versionResult.stdout.trim() === "portalx 0.1.4", "Version command should print the current version");
 
     const configPathResult = await runCommand(["bun", "run", "cli", "--", "config", "path"], {
         PORTALX_CONFIG: cliConfigPath,

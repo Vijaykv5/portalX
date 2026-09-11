@@ -47,6 +47,13 @@ By default, the published CLI connects to:
 wss://relay.vijaykv.xyz
 ```
 
+For hosted Portalx, log in once:
+
+```bash
+portalx login
+portalx http 3000
+```
+
 Open:
 
 ```txt
@@ -85,10 +92,17 @@ CLI:
 PORTALX_SERVER_URL=ws://localhost:8081 PORTALX_AUTH_TOKEN=secret123 bun run portalx -- http 3000
 ```
 
-For the published CLI, save the token once:
+For local/manual testing, save the token once:
 
 ```bash
 portalx config set authToken secret123
+portalx http 3000
+```
+
+For hosted Portalx, prefer browser login:
+
+```bash
+portalx login
 portalx http 3000
 ```
 
@@ -103,9 +117,11 @@ CLI options:
 ```bash
 bun run portalx -- --help
 bun run portalx -- --version
+portalx login
 bun run portalx -- http 3000
 bun run portalx -- http --port 5173 --server ws://localhost:8081
 portalx config set serverUrl wss://relay.vijaykv.xyz
+portalx config set apiUrl https://api.vijaykv.xyz
 portalx config set authToken secret123
 portalx config get
 portalx config path
@@ -142,6 +158,7 @@ Example:
 {
   "localPort": 3000,
   "serverUrl": "wss://relay.vijaykv.xyz",
+  "apiUrl": "https://api.vijaykv.xyz",
   "authToken": "secret123"
 }
 ```
@@ -150,6 +167,7 @@ Create that file through the CLI:
 
 ```bash
 portalx config set serverUrl wss://relay.vijaykv.xyz
+portalx config set apiUrl https://api.vijaykv.xyz
 portalx config set authToken secret123
 portalx config set localPort 3000
 ```
@@ -198,6 +216,44 @@ http://localhost:8081/_connect-check?token=dev-token
 
 This returns `200` when the server can accept a tunnel, `401` for a bad token, and `409` when another CLI is already connected.
 
+## Hosted Login
+
+The Cloudflare Worker relay includes a first-pass GitHub OAuth login flow for the CLI. This version does not use a database yet; it keeps short-lived CLI login sessions in the Worker Durable Object and issues signed Portalx tunnel tokens.
+
+GitHub OAuth app settings:
+
+```txt
+Homepage URL: https://portalx.vijaykv.xyz
+Authorization callback URL: https://api.vijaykv.xyz/auth/github/callback
+```
+
+Cloudflare routes:
+
+```txt
+portalx.vijaykv.xyz  -> Cloudflare Pages frontend
+api.vijaykv.xyz      -> Portalx Worker auth API
+relay.vijaykv.xyz    -> Portalx Worker relay
+*.vijaykv.xyz        -> Portalx tunnel URLs
+```
+
+Worker secrets:
+
+```bash
+bunx wrangler secret put GITHUB_CLIENT_ID
+bunx wrangler secret put GITHUB_CLIENT_SECRET
+bunx wrangler secret put PORTALX_TOKEN_SECRET
+bun run worker:deploy
+```
+
+CLI flow:
+
+```bash
+portalx login
+portalx http 3000
+```
+
+The CLI opens GitHub login, polls `https://api.vijaykv.xyz/cli/session/<id>`, then saves the returned token to `~/.portalx/config.json`.
+
 ## Test
 
 Run the end-to-end smoke test:
@@ -211,6 +267,7 @@ The test starts a temporary tunnel server, a temporary local app, and a CLI proc
 ## What Works
 
 - One active tunnel connection
+- GitHub OAuth CLI login without a database
 - Shared auth token for CLI connections
 - Configurable server port
 - Configurable local target port
@@ -228,7 +285,7 @@ The test starts a temporary tunnel server, a temporary local app, and a CLI proc
 - HTTP only
 - No public deployment setup yet
 - No TLS/domain/subdomain support yet
-- No user accounts or plan tiers yet
+- No persistent account database or plan tiers yet
 - No streaming request or response bodies yet
 - WebSocket traffic through the tunnel is not supported yet
 
@@ -250,6 +307,6 @@ packages/protocol/src/index.ts
 1. Add public deployment with a real hosted URL.
 2. Add TLS and deploy the server to a public VPS.
 3. Add streaming body support for large uploads/downloads.
-4. Add accounts, plan limits, and stronger auth.
+4. Persist users, sessions, and token hashes in Cloudflare D1.
 5. Add request metrics and prettier CLI output.
 6. Package and publish the CLI.

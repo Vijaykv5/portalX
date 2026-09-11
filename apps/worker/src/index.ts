@@ -13,6 +13,9 @@ type Env = {
     PORTALX_AUTH_TOKEN?: string;
     PORTALX_BASE_DOMAIN?: string;
     PORTALX_REQUEST_TIMEOUT_MS?: string;
+    GITHUB_CLIENT_ID?: string;
+    GITHUB_CLIENT_SECRET?: string;
+    PORTALX_TOKEN_SECRET?: string;
 };
 
 type DurableObjectNamespace = {
@@ -71,6 +74,30 @@ type WebSocketResponseInit = ResponseInit & {
     webSocket: WebSocket;
 };
 
+type LoginSession = {
+    sessionId: string;
+    state: string;
+    status: "pending" | "approved";
+    createdAt: string;
+    expiresAt: number;
+    token?: string;
+    githubId?: number;
+    username?: string;
+};
+
+type GitHubAccessTokenResponse = {
+    access_token?: string;
+    error?: string;
+    error_description?: string;
+};
+
+type GitHubUserResponse = {
+    id: number;
+    login: string;
+};
+
+const LOGIN_SESSION_TTL_MS = 10 * 60 * 1000;
+
 export default {
     fetch(request: Request, env: Env) {
         const id = env.PORTALX_RELAY.idFromName("global");
@@ -83,6 +110,8 @@ export default {
 export class PortalxRelay {
     private activeTunnelsByToken = new Map<string, TunnelRecord>();
     private activeTunnelsBySlug = new Map<string, TunnelRecord>();
+    private loginSessionsById = new Map<string, LoginSession>();
+    private loginSessionsByState = new Map<string, LoginSession>();
     private pendingRequests = new Map<string, PendingRequest>();
 
     constructor(
@@ -117,6 +146,18 @@ export class PortalxRelay {
 
         if (url.pathname === "/_connect-check") {
             return this.checkTunnelConnection(url.searchParams.get("token"));
+        }
+
+        if (url.pathname === "/auth/github/start") {
+            return this.startGitHubLogin(req);
+        }
+
+        if (url.pathname === "/auth/github/callback") {
+            return this.finishGitHubLogin(req);
+        }
+
+        if (url.pathname.startsWith("/cli/session/")) {
+            return this.getCliSession(req);
         }
 
         if (url.pathname === "/tunnel") {
@@ -158,10 +199,10 @@ export class PortalxRelay {
         this.removeTunnel(socket);
     }
 
-    private connectTunnel(req: Request) {
+    private async connectTunnel(req: Request) {
         const url = new URL(req.url);
         const token = url.searchParams.get("token");
-        const checkResponse = this.checkTunnelConnection(token);
+        const checkResponse = await this.checkTunnelConnection(token);
 
         if (!checkResponse.ok) {
             return checkResponse;
@@ -281,8 +322,8 @@ export class PortalxRelay {
         };
     }
 
-    private checkTunnelConnection(token: string | null) {
-        if (!token || !this.allowedTokens.has(token)) {
+    private async checkTunnelConnection(token: string | null) {
+        if (!token || !(await this.isAllowedToken(token))) {
             return new Response("Invalid tunnel auth token", {
                 status: 401,
             });
@@ -296,6 +337,164 @@ export class PortalxRelay {
 
         return Response.json({
             ok: true,
+        });
+    }
+
+    private startGitHubLogin(req: Request) {
+        const envError = this.getGitHubConfigError();
+
+        if (envError) {
+            return new Response(envError, {
+                status: 500,
+            });
+        }
+
+        const url = new URL(req.url);
+        const sessionId = url.searchParams.get("session");
+
+        if (!sessionId) {
+            return new Response("Missing CLI session id", {
+                status: 400,
+            });
+        }
+
+        this.cleanupExpiredLoginSessions();
+
+        const state = crypto.randomUUID();
+        const session: LoginSession = {
+            sessionId,
+            state,
+            status: "pending",
+            createdAt: new Date().toISOString(),
+            expiresAt: Date.now() + LOGIN_SESSION_TTL_MS,
+        };
+
+        this.loginSessionsById.set(sessionId, session);
+        this.loginSessionsByState.set(state, session);
+
+        const githubUrl = new URL("https://github.com/login/oauth/authorize");
+        githubUrl.searchParams.set("client_id", this.env.GITHUB_CLIENT_ID ?? "");
+        githubUrl.searchParams.set("redirect_uri", `${url.origin}/auth/github/callback`);
+        githubUrl.searchParams.set("state", state);
+        githubUrl.searchParams.set("scope", "read:user");
+
+        return Response.redirect(githubUrl.toString(), 302);
+    }
+
+    private async finishGitHubLogin(req: Request) {
+        const envError = this.getGitHubConfigError();
+
+        if (envError) {
+            return new Response(envError, {
+                status: 500,
+            });
+        }
+
+        this.cleanupExpiredLoginSessions();
+
+        const url = new URL(req.url);
+        const code = url.searchParams.get("code");
+        const state = url.searchParams.get("state");
+
+        if (!code || !state) {
+            return new Response("Missing GitHub OAuth code or state", {
+                status: 400,
+            });
+        }
+
+        const session = this.loginSessionsByState.get(state);
+
+        if (!session) {
+            return new Response("Login session expired. Run portalx login again.", {
+                status: 400,
+            });
+        }
+
+        const tokenRequestBody = new URLSearchParams({
+            client_id: this.env.GITHUB_CLIENT_ID ?? "",
+            client_secret: this.env.GITHUB_CLIENT_SECRET ?? "",
+            code,
+            redirect_uri: `${url.origin}/auth/github/callback`,
+        });
+
+        const accessTokenResponse = await fetch("https://github.com/login/oauth/access_token", {
+            method: "POST",
+            headers: {
+                accept: "application/json",
+                "content-type": "application/x-www-form-urlencoded",
+            },
+            body: tokenRequestBody,
+        });
+        const accessTokenBody = await accessTokenResponse.json() as GitHubAccessTokenResponse;
+
+        if (!accessTokenResponse.ok || !accessTokenBody.access_token) {
+            const message = accessTokenBody.error_description
+                ? `GitHub OAuth token exchange failed: ${accessTokenBody.error_description}`
+                : `GitHub OAuth token exchange failed${accessTokenBody.error ? `: ${accessTokenBody.error}` : ""}`;
+
+            return new Response(message, {
+                status: 401,
+            });
+        }
+
+        const userResponse = await fetch("https://api.github.com/user", {
+            headers: {
+                accept: "application/vnd.github+json",
+                authorization: `Bearer ${accessTokenBody.access_token}`,
+                "user-agent": "portalx",
+            },
+        });
+
+        if (!userResponse.ok) {
+            return new Response("Could not read GitHub user profile", {
+                status: 401,
+            });
+        }
+
+        const user = await userResponse.json() as GitHubUserResponse;
+        const token = await this.createPortalxToken(user);
+
+        session.status = "approved";
+        session.token = token;
+        session.githubId = user.id;
+        session.username = user.login;
+        this.loginSessionsById.set(session.sessionId, session);
+
+        return new Response(this.getLoginSuccessHtml(user.login), {
+            headers: {
+                "content-type": "text/html; charset=utf-8",
+            },
+        });
+    }
+
+    private getCliSession(req: Request) {
+        this.cleanupExpiredLoginSessions();
+
+        const url = new URL(req.url);
+        const sessionId = url.pathname.split("/").pop();
+        const session = sessionId ? this.loginSessionsById.get(sessionId) : undefined;
+
+        if (!session) {
+            return Response.json({
+                status: "expired",
+            }, {
+                status: 404,
+            });
+        }
+
+        if (session.status === "pending") {
+            return Response.json({
+                status: "pending",
+            });
+        }
+
+        return Response.json({
+            status: "approved",
+            token: session.token,
+            user: {
+                id: session.githubId,
+                username: session.username,
+            },
         });
     }
 
@@ -398,6 +597,111 @@ export class PortalxRelay {
 
     private createTunnelSlug() {
         return crypto.randomUUID().replaceAll("-", "").slice(0, TUNNEL_SLUG_LENGTH);
+    }
+
+    private async isAllowedToken(token: string) {
+        return this.allowedTokens.has(token) || await this.verifyPortalxToken(token);
+    }
+
+    private async createPortalxToken(user: GitHubUserResponse) {
+        const payload = this.toBase64Url(JSON.stringify({
+            sub: String(user.id),
+            login: user.login,
+            iat: Math.floor(Date.now() / 1000),
+        }));
+        const signature = await this.signTokenPayload(payload);
+
+        return `px_${payload}.${signature}`;
+    }
+
+    private async verifyPortalxToken(token: string) {
+        if (!token.startsWith("px_") || !this.env.PORTALX_TOKEN_SECRET) {
+            return false;
+        }
+
+        const tokenBody = token.slice(3);
+        const [payload, signature] = tokenBody.split(".");
+
+        if (!payload || !signature) {
+            return false;
+        }
+
+        return await this.signTokenPayload(payload) === signature;
+    }
+
+    private async signTokenPayload(payload: string) {
+        const key = await crypto.subtle.importKey(
+            "raw",
+            new TextEncoder().encode(this.env.PORTALX_TOKEN_SECRET ?? ""),
+            {
+                name: "HMAC",
+                hash: "SHA-256",
+            },
+            false,
+            ["sign"]
+        );
+        const signature = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(payload));
+
+        return this.toBase64Url(signature);
+    }
+
+    private toBase64Url(value: string | ArrayBuffer) {
+        const buffer = typeof value === "string" ? Buffer.from(value) : Buffer.from(value);
+        return buffer.toString("base64").replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", "");
+    }
+
+    private cleanupExpiredLoginSessions() {
+        const now = Date.now();
+
+        for (const session of this.loginSessionsById.values()) {
+            if (session.expiresAt > now) {
+                continue;
+            }
+
+            this.loginSessionsById.delete(session.sessionId);
+            this.loginSessionsByState.delete(session.state);
+        }
+    }
+
+    private getGitHubConfigError() {
+        if (!this.env.GITHUB_CLIENT_ID || !this.env.GITHUB_CLIENT_SECRET || !this.env.PORTALX_TOKEN_SECRET) {
+            return "Portalx GitHub auth is not configured";
+        }
+
+        return null;
+    }
+
+    private getLoginSuccessHtml(username: string) {
+        return `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Portalx login complete</title>
+  <style>
+    body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: #05060a; color: #f6f7fb; font-family: system-ui, sans-serif; }
+    main { max-width: 36rem; padding: 2rem; text-align: center; }
+    h1 { font-size: 2rem; margin: 0 0 0.75rem; }
+    p { color: rgba(246, 247, 251, 0.62); line-height: 1.7; }
+    strong { color: #fff; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Portalx login complete</h1>
+    <p>Signed in as <strong>@${this.escapeHtml(username)}</strong>. You can close this tab and return to your terminal.</p>
+  </main>
+</body>
+</html>`;
+    }
+
+    private escapeHtml(value: string) {
+        return value
+            .replaceAll("&", "&amp;")
+            .replaceAll("<", "&lt;")
+            .replaceAll(">", "&gt;")
+            .replaceAll('"', "&quot;")
+            .replaceAll("'", "&#039;");
     }
 
     private get allowedTokens() {
