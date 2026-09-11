@@ -233,7 +233,7 @@ Cloudflare routes:
 portalx.vijaykv.xyz  -> Cloudflare Pages frontend
 api.vijaykv.xyz      -> Portalx Worker auth API
 relay.vijaykv.xyz    -> Portalx Worker relay
-*.vijaykv.xyz        -> Portalx tunnel URLs
+*.tunnel.vijaykv.xyz -> Portalx tunnel URLs
 ```
 
 Worker secrets:
@@ -253,6 +253,12 @@ portalx http 3000
 ```
 
 The CLI opens GitHub login, polls `https://api.vijaykv.xyz/cli/session/<id>`, then saves the returned token to `~/.portalx/config.json`.
+
+Tunnel URLs are generated under:
+
+```txt
+https://<random>.tunnel.vijaykv.xyz
+```
 
 ## Test
 
