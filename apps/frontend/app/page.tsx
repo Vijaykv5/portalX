@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useState } from "react";
 
-const command = "npm install -g @vijaykv/portalx && portalx http 3000";
+const command = "npm install -g @vijaykv/portalx";
 
 export default function Home() {
   const [copied, setCopied] = useState(false);

@@ -1,7 +1,7 @@
 {
   "name": "@vijaykv/portalx",
-  "version": "0.1.4",
-  "description": "A lightweight ngrok-style HTTP tunnel for forwarding localhost apps to public URLs.",
+  "version": "0.1.5",
+  "description": "Share localhost apps with public URLs from your terminal.",
   "module": "index.ts",
   "type": "module",
   "license": "MIT",
